@@ -28,7 +28,8 @@ MAX_TOKENS_PER_CALL = 8192
 RATE_LIMIT_RUNS = int(os.environ.get("APP_RATE_LIMIT", "10"))   # cost cap (plan §10)
 RATE_LIMIT_WINDOW = 600  # seconds
 
-# Windows fonts with full Vietnamese diacritics support, used by the PDF fallback.
+# Fallback system fonts (the primary PDF font is vendored in assets/fonts/ —
+# see app/render_pdf.py). Windows paths kept for machines without the asset.
 PDF_FONT_CANDIDATES = [
     r"C:\Windows\Fonts\times.ttf",
     r"C:\Windows\Fonts\arial.ttf",

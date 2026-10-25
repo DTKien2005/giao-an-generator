@@ -20,14 +20,25 @@ def _register_font():
         return
     from reportlab.pdfbase import pdfmetrics
     from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.pdfbase.pdfmetrics import registerFontFamily
 
-    for candidate in config.PDF_FONT_CANDIDATES:
-        path = Path(candidate)
-        if path.exists():
-            pdfmetrics.registerFont(TTFont("VNFont", str(path)))
+    # The vendored font (full Vietnamese diacritics, OFL) ships with the repo,
+    # so rendering is identical on Windows / Linux / Docker / CI. System fonts
+    # are only a fallback if the asset ever goes missing.
+    repo_font = Path(__file__).resolve().parent.parent / "assets" / "fonts" / "IBMPlexSerif-Regular.ttf"
+    repo_bold = repo_font.with_name("IBMPlexSerif-Bold.ttf")
+    candidates = [repo_font] + [Path(p) for p in config.PDF_FONT_CANDIDATES]
+
+    for candidate in candidates:
+        if candidate.exists():
+            pdfmetrics.registerFont(TTFont("VNFont", str(candidate)))
+            if candidate == repo_font and repo_bold.exists():
+                pdfmetrics.registerFont(TTFont("VNFont-Bold", str(repo_bold)))
+                registerFontFamily("VNFont", normal="VNFont", bold="VNFont-Bold",
+                                   italic="VNFont", boldItalic="VNFont-Bold")
             _font_registered = True
             return
-    raise RuntimeError("Không tìm thấy font tiếng Việt cho PDF (Times New Roman/Arial)")
+    raise RuntimeError("Không tìm thấy font tiếng Việt cho PDF (assets/fonts hoặc Times New Roman)")
 
 
 def _soffice_path() -> str | None:
