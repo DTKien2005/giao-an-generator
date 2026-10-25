@@ -280,6 +280,25 @@ decisions taken, and how the milestone was verified.
 
 ---
 
+## v2 — OCR PDF quét bằng Gemini Vision (PLANS.md §3.1)
+**Date:** 2026-10-26 · **Repo:** tag `v2`
+
+**Added**
+- `app/ocr.py` — trang PDF không lớp chữ được dựng ảnh 150 dpi → Gemini Vision
+  transcribe tiếng Việt; không có khoá → bỏ qua trang an toàn + cảnh báo.
+- `app/ingest.py` — PDF đi qua đường OCR; cảnh báo từng trang vào `stats["skipped"]`.
+- `app/main.py` — tải lên PDF quét mà thiếu khoá báo lỗi rõ nguyên nhân.
+- `tests/test_ocr.py` — 5 test (định tuyến OCR, bỏ qua an toàn, hàm OCR giả,
+  hình dạng request Gemini thật, ingest báo trang bỏ qua).
+
+**Fixed during review:** 3 lỗi test (font base-14 không có dấu tiếng Việt, sai
+mục tiêu monkeypatch, page sau khi đóng tài liệu); 1 hồi quy do test ingest xóa
+bảng chunks dùng chung (khôi phục bằng try/finally); lỗi upload PDF quét mơ hồ.
+
+**Verified:** pytest 41/41; bộ đánh giá v1 vẫn 10/10.
+
+---
+
 ### Cách chạy lại
 ```bash
 python -m app.ingest && python -m uvicorn app.main:app --port 8090   # mock, không cần key

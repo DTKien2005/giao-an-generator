@@ -24,6 +24,7 @@ MAX_CHUNK_CHARS = 1600
 
 
 def file_to_text(path: Path) -> str:
+    """Text content of a file; scanned-PDF pages are OCR'd when possible."""
     suffix = path.suffix.lower()
     if suffix in (".txt", ".md"):
         return path.read_text(encoding="utf-8", errors="replace")
@@ -36,10 +37,10 @@ def file_to_text(path: Path) -> str:
                 parts.append("\t".join(c.text for c in row.cells))
         return "\n".join(parts)
     if suffix == ".pdf":
-        import pymupdf
+        from .ocr import extract_pdf_text
 
-        with pymupdf.open(str(path)) as pdf:
-            return "\n".join(page.get_text() for page in pdf)
+        text, _warnings = extract_pdf_text(path)
+        return text
     raise ValueError(f"Unsupported file type: {path.suffix}")
 
 
@@ -119,7 +120,13 @@ def ingest(dataset_dir: Path | None = None) -> dict:
              "worksheets": "worksheet"}.get(parts[2], parts[2]) if len(parts) >= 3 else ""
         )
         try:
-            text = file_to_text(path)
+            if path.suffix.lower() == ".pdf":
+                from .ocr import extract_pdf_text
+
+                text, warnings = extract_pdf_text(path)
+                stats["skipped"].extend(warnings)  # scanned pages skipped, per page
+            else:
+                text = file_to_text(path)
         except Exception as exc:
             stats["skipped"].append(f"{path.name} ({exc})")
             continue

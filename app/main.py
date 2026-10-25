@@ -105,7 +105,18 @@ def _extract_upload(upload: UploadFile) -> str:
     dest = config.UPLOADS_DIR / f"{upload.filename}"
     dest.write_bytes(upload.file.read())
     try:
+        if suffix == ".pdf":
+            from .ocr import extract_pdf_text
+
+            text, warnings = extract_pdf_text(dest)
+            if not text.strip() and warnings:
+                raise HTTPException(
+                    400, "Tệp PDF là bản quét và chưa có khoá Gemini để OCR: "
+                    + "; ".join(warnings[:3]))
+            return text
         return file_to_text(dest)
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(400, f"Không đọc được tệp: {exc}") from exc
 
