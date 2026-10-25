@@ -67,6 +67,10 @@ python -m app.evaluate           # chạy với mock; thêm --provider gemini kh
 pip install -r requirements.txt
 ```
 
+Triển khai Docker, truy cập từ xa qua Cloudflare Tunnel, sao lưu định kỳ và nâng
+cấp: xem **[docs/DEPLOY.md](docs/DEPLOY.md)**. Mỗi push vào `main` được CI
+(GitHub Actions) chạy pytest + bộ đánh giá tự động.
+
 ## Đăng nhập (từ v3)
 
 Mặc định app chạy **mở** (không đăng nhập) đúng như trước. Vào tab **Cài đặt →

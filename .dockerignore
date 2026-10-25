@@ -1,0 +1,12 @@
+.git
+.github
+data/
+data*/
+backups/
+skills/
+andrej-karpathy-skills-main/
+tests/
+__pycache__/
+*.pyc
+.pytest_cache/
+docs/
