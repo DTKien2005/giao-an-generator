@@ -264,6 +264,22 @@ decisions taken, and how the milestone was verified.
 - **OCR PDF quét bằng Gemini vision** (§3.1).
 - **Danh sách các quyết định kỹ thuật** nằm rải trong từng entry ở trên; quan trọng nhất: vector store = BLOB + numpy cosine (thay sqlite-vec/Chroma), và mock provider để toàn bộ hệ thống chạy/check-test được khi không có API key.
 
+## v1 — Bộ đánh giá chất lượng + requirements.txt
+**Date:** 2026-10-26 · **Repo:** `DTKien2005/giao-an-generator` (tag `v1`)
+
+**Added**
+- `eval/` — 10 ca đánh giá gốc (lớp 1–5, Toán/Tiếng Việt/Tiếng Anh, giáo án +
+  phiếu bài tập) với kỳ vọng xác định theo từng ca.
+- `app/evaluate.py` + CLI `python -m app.evaluate` — chấm rubric không dùng LLM:
+  cấu trúc, bám từ khoá SGK, thời lượng, đáp án, dấu tiếng Việt, tệp kết xuất.
+- `tests/test_evaluate.py` (3 test), `requirements.txt`, README mục đánh giá.
+- Tài liệu quy trình: `reports/v1_review.md` (3 vòng duyệt, có sửa lỗi thật) và
+  `reports/v1_report.md` (2 vòng duyệt).
+
+**Verified:** `python -m app.evaluate` → 10/10 PASS (mock); pytest 36/36.
+
+---
+
 ### Cách chạy lại
 ```bash
 python -m app.ingest && python -m uvicorn app.main:app --port 8090   # mock, không cần key

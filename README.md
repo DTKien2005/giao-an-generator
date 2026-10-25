@@ -50,6 +50,23 @@ python -m app.cli "Giáo án toán lớp 1 bài các số có hai chữ số" --
 python -m pytest tests/ -q
 ```
 
+## Bộ đánh giá chất lượng (v1)
+
+10 ca đánh giá trong `eval/` (lớp 1–5, Toán / Tiếng Việt / Tiếng Anh) chấm bằng
+rubric xác định — đủ mục theo định dạng, nội dung bám SGK, thời lượng hợp lý,
+dấu tiếng Việt chuẩn, có kết xuất tệp:
+
+```bash
+python scripts/make_eval.py      # nếu chưa có eval/
+python -m app.evaluate           # chạy với mock; thêm --provider gemini khi có khoá
+```
+
+## Cài đặt
+
+```bash
+pip install -r requirements.txt
+```
+
 ## Biến môi trường
 
 | Biến | Ý nghĩa | Mặc định |

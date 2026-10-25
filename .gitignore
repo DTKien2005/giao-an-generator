@@ -4,9 +4,7 @@
 /andrej-karpathy-skills-main/
 
 # Local data: SQLite DB, generated .docx/.pdf, uploads, encryption key
-/data/
-/data_dev/
-/data_test/
+data*/
 
 # Python
 __pycache__/
