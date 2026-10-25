@@ -1,0 +1,15 @@
+# Third-party reference skill libraries (guidance material, not part of the app;
+# see README "Nguồn tham khảo")
+/skills/
+/andrej-karpathy-skills-main/
+
+# Local data: SQLite DB, generated .docx/.pdf, uploads, encryption key
+/data/
+/data_dev/
+/data_test/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/

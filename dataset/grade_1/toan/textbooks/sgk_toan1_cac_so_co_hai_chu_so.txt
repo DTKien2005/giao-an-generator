@@ -1,0 +1,17 @@
+Bài: CÁC SỐ CÓ HAI CHỮ SỐ
+
+Yêu cầu cần đạt
+- Đọc, viết các số từ 20 đến 50.
+- So sánh các số có hai chữ số trong phạm vi 50.
+- Nhận biết số lượng chục, đơn vị của một số có hai chữ số.
+
+Nội dung chính
+1. Đếm thêm các chục: hai mươi (20), ba mươi (30), bốn mươi (40), năm mươi (50).
+2. Mỗi số có hai chữ số gồm số chục và số đơn vị. Ví dụ: 24 gồm 2 chục và 4 đơn vị.
+3. So sánh số có hai chữ số: so sánh số chục trước, nếu số chục bằng nhau thì so sánh số đơn vị.
+   Ví dụ: 34 < 43 vì 3 chục ít hơn 4 chục; 45 > 42 vì cùng 4 chục mà 5 đơn vị nhiều hơn 2 đơn vị.
+
+Bài tập mẫu
+Bài 1. Viết các số: hai mươi bảy, bốn mươi, ba mươi chín thành chữ số.
+Bài 2. Khoanh vào số lớn nhất trong: 25, 52, 34, 43.
+Bài 3. Điền dấu <, >, =: 38 … 41; 50 … 50; 29 … 92.

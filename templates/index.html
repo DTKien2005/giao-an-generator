@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Soạn Giáo Án &amp; Phiếu Bài Tập</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<div class="paper">
+  <header class="masthead">
+    <div class="masthead-inner">
+      <h1>Soạn <em>Giáo Án</em></h1>
+      <p class="tagline">Trợ lý soạn giáo án &amp; phiếu bài tập — nháp → thẩm định → chỉnh sửa, tới 3 vòng</p>
+      <span class="stamp" id="provider-badge">…</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <!-- ============ LEFT: request form + progress ============ -->
+    <section class="column">
+      <form id="request-form" class="card" autocomplete="off">
+        <h2 class="card-title">Yêu cầu mới</h2>
+
+        <div class="segmented" role="radiogroup" aria-label="Loại tài liệu">
+          <input type="radio" name="doc_type" id="dt-plan" value="lesson_plan" checked>
+          <label for="dt-plan">Giáo án</label>
+          <input type="radio" name="doc_type" id="dt-sheet" value="worksheet">
+          <label for="dt-sheet">Phiếu bài tập</label>
+        </div>
+
+        <div class="field-row">
+          <label class="field">
+            <span>Khối lớp</span>
+            <select name="grade" id="grade">
+              <option value="">— chọn —</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Môn</span>
+            <select name="subject" id="subject">
+              <option value="">— chọn —</option>
+              <option value="toan">Toán</option>
+              <option value="tieng_viet">Tiếng Việt</option>
+              <option value="khoa_hoc">Khoa học</option>
+              <option value="lich_su">Lịch sử - Địa lí</option>
+              <option value="dao_duc">Đạo đức</option>
+              <option value="ta">Tiếng Anh</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Tên bài / chủ đề</span>
+          <input type="text" name="lesson" id="lesson" placeholder="VD: Các số có hai chữ số">
+        </label>
+
+        <label class="field" id="week-field" hidden>
+          <span>Tuần</span>
+          <input type="text" name="week" id="week" placeholder="VD: 3">
+        </label>
+
+        <label class="field">
+          <span>Nội dung (dán văn bản, đề bài, hoặc để trống nếu đã điền tên bài)</span>
+          <textarea name="text" id="text" rows="5"
+            placeholder="Dán nội dung SGK, yêu cầu của bạn…"></textarea>
+        </label>
+
+        <label class="field file-field">
+          <span>Hoặc tải tệp lên (.docx, .pdf, .txt)</span>
+          <input type="file" name="file" id="file" accept=".docx,.pdf,.txt,.md">
+          <span class="file-name" id="file-name"></span>
+        </label>
+
+        <button type="submit" class="btn-primary" id="btn-generate">Soạn tài liệu</button>
+        <p class="hint">Mỗi lần soạn gồm: tiếp nhận → truy xuất tài liệu → nháp → thẩm định → chỉnh sửa (tối đa 3 vòng) → kết xuất Word/PDF.</p>
+      </form>
+
+      <div class="card progress-card" id="progress-card" hidden>
+        <h2 class="card-title">Tiến độ</h2>
+        <ul id="progress-lines" class="progress-lines"></ul>
+      </div>
+    </section>
+
+    <!-- ============ RIGHT: workspace ============ -->
+    <section class="column workspace">
+      <nav class="tabs">
+        <button class="tab active" data-tab="doc">Tài liệu</button>
+        <button class="tab" data-tab="history">Lịch sử</button>
+        <button class="tab" data-tab="settings">Cài đặt</button>
+      </nav>
+
+      <div id="tab-doc" class="tab-panel">
+        <div id="doc-empty" class="empty-state">
+          <div class="empty-icon">✎</div>
+          <p>Chưa có tài liệu nào mở.<br>Gửi một yêu cầu ở bên trái, hoặc chọn từ Lịch sử.</p>
+        </div>
+        <article id="doc-view" hidden>
+          <div class="doc-head">
+            <h2 id="doc-title"></h2>
+            <p class="doc-meta" id="doc-meta"></p>
+            <div class="doc-actions">
+              <div class="version-picker">
+                <label for="version-select">Phiên bản</label>
+                <select id="version-select"></select>
+              </div>
+              <a class="btn-dl" id="dl-docx" href="#" download>⬇ Word</a>
+              <a class="btn-dl" id="dl-pdf" href="#" download>⬇ PDF</a>
+              <button class="btn-dl" id="btn-diff" hidden>⇄ So sánh với bản trước</button>
+            </div>
+          </div>
+          <div id="diff-view" class="diff-view" hidden></div>
+          <div id="doc-content" class="doc-body"></div>
+          <div id="doc-note" class="doc-note"></div>
+
+          <div class="chat">
+            <h3 class="chat-title">Chỉnh sửa tiếp theo yêu cầu</h3>
+            <ul id="chat-messages" class="chat-messages"></ul>
+            <form id="edit-form" class="edit-form">
+              <input type="text" id="edit-input"
+                placeholder="VD: thêm trò chơi củng cố cuối giờ, sửa đáp án bài 2…">
+              <button type="submit" class="btn-primary">Gửi</button>
+            </form>
+            <p class="hint">Thay đổi nhỏ → sửa một mục rồi thẩm định lại. Yêu cầu lớn → chạy lại toàn bộ quy trình. Mọi kết quả lưu thành phiên bản mới.</p>
+          </div>
+        </article>
+      </div>
+
+      <div id="tab-history" class="tab-panel" hidden>
+        <ul id="history-list" class="history-list"></ul>
+      </div>
+
+      <div id="tab-settings" class="tab-panel" hidden>
+        <form class="card" id="settings-form" autocomplete="off">
+          <h2 class="card-title">Cài đặt nhà cung cấp &amp; mô hình</h2>
+
+          <label class="field">
+            <span>Nhà cung cấp mặc định</span>
+            <select id="set-provider">
+              <option value="gemini">Gemini</option>
+              <option value="openai">OpenAI</option>
+              <option value="anthropic">Anthropic (Claude)</option>
+              <option value="local">Mô hình cục bộ (Ollama / LM Studio / vLLM)</option>
+              <option value="mock">Mock (ngoại tuyến, để thử nghiệm)</option>
+            </select>
+          </label>
+
+          <div class="field-row">
+            <label class="field">
+              <span>Mô hình Writer</span>
+              <input type="text" id="set-model-writer" placeholder="VD: gemini-2.5-flash">
+            </label>
+            <label class="field">
+              <span>Mô hình Reviewer</span>
+              <input type="text" id="set-model-reviewer" placeholder="Có thể khác Writer">
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Mô hình Reviser</span>
+              <input type="text" id="set-model-reviser">
+            </label>
+            <label class="field">
+              <span>Mô hình Intake</span>
+              <input type="text" id="set-model-intake">
+            </label>
+          </div>
+
+          <div class="field-row">
+            <label class="field">
+              <span>Khoá Gemini API</span>
+              <input type="password" id="set-key-gemini" placeholder="dán khoá — để trống nếu giữ nguyên">
+            </label>
+            <label class="field">
+              <span>Khoá OpenAI API</span>
+              <input type="password" id="set-key-openai" placeholder="dán khoá — để trống nếu giữ nguyên">
+            </label>
+          </div>
+          <div class="field-row">
+            <label class="field">
+              <span>Khoá Anthropic API</span>
+              <input type="password" id="set-key-anthropic" placeholder="dán khoá — để trống nếu giữ nguyên">
+            </label>
+            <label class="field">
+              <span>Địa chỉ máy cục bộ (base URL)</span>
+              <input type="text" id="set-url-local" placeholder="http://localhost:11434/v1">
+            </label>
+          </div>
+
+          <button type="submit" class="btn-primary">Lưu cài đặt</button>
+          <p class="hint">Khoá API được mã hoá trước khi lưu vào máy bạn. Mỗi vai trò (Writer/Reviewer/Reviser) có thể dùng một mô hình riêng — nên để Reviewer khác Writer để thẩm định khách quan hơn.</p>
+          <p class="hint" id="settings-status"></p>
+        </form>
+      </div>
+    </section>
+  </main>
+
+  <footer class="colophon">
+    Chạy cục bộ · dữ liệu lưu trong <code>data/app.db</code> · Gemini mặc định, đổi nhà cung cấp ở phần Cài đặt (v0.6)
+  </footer>
+</div>
+<script src="/static/app.js"></script>
+</body>
+</html>

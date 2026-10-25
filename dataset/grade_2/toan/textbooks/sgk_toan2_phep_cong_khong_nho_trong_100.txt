@@ -1,0 +1,15 @@
+Bài: PHÉP CỘNG KHÔNG NHỚ TRONG PHẠM VI 100
+
+Yêu cầu cần đạt
+- Thực hiện được phép cộng không nhớ trong phạm vi 100 (dạng 25 + 31, 34 + 15).
+- Vận dụng vào giải bài toán có lời văn đơn giản.
+
+Nội dung chính
+1. Cộng số có hai chữ số với số có hai chữ số không nhớ: cộng các đơn vị với nhau,
+   cộng các chục với nhau. Ví dụ: 25 + 31 = 56 vì 5 + 1 = 6 và 2 chục + 3 chục = 5 chục.
+2. Dạng 34 + 15: 4 + 5 = 9; 3 chục + 1 chục = 4 chục; kết quả 49.
+3. Bài toán có lời văn: đọc kĩ đề, xác định số đã cho, phép tính phải dùng.
+
+Bài tập mẫu
+Bài 1. Đặt tính rồi tính: 42 + 36; 51 + 27.
+Bài 2. Lan có 32 quyển vở, Huệ có nhiều hơn Lan 14 quyển vở. Hỏi Huệ có bao nhiêu quyển vở?

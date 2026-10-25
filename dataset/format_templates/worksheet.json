@@ -1,0 +1,16 @@
+{
+  "doc_type": "worksheet",
+  "title": "PHIẾU BÀI TẬP TUẦN {week} – {subject_upper} LỚP {grade_num}",
+  "sections": [
+    {
+      "id": "exercises",
+      "type": "exercises",
+      "label": "BÀI TẬP"
+    },
+    {
+      "id": "answers",
+      "type": "text",
+      "label": "ĐÁP ÁN"
+    }
+  ]
+}

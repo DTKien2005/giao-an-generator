@@ -1,0 +1,45 @@
+{
+  "doc_type": "lesson_plan",
+  "title": "GIÁO ÁN {subject_upper} LỚP {grade_num}",
+  "sections": [
+    {
+      "id": "header",
+      "type": "kv_pairs",
+      "label": "Bài dạy",
+      "fields": [
+        "lesson",
+        "duration"
+      ]
+    },
+    {
+      "id": "objectives",
+      "type": "bullets",
+      "label": "I. MỤC TIÊU"
+    },
+    {
+      "id": "materials",
+      "type": "bullets",
+      "label": "II. ĐỒ DÙNG DẠY HỌC"
+    },
+    {
+      "id": "activities",
+      "type": "activities",
+      "label": "III. CÁC HOẠT ĐỘNG DẠY HỌC",
+      "activity_fields": [
+        "teacher",
+        "students"
+      ]
+    },
+    {
+      "id": "assessment",
+      "type": "text",
+      "label": "IV. ĐÁNH GIÁ"
+    },
+    {
+      "id": "appendix",
+      "type": "text",
+      "label": "PHỤ LỤC",
+      "optional": true
+    }
+  ]
+}
