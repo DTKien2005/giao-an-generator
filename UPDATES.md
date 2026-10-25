@@ -299,6 +299,31 @@ bảng chunks dùng chung (khôi phục bằng try/finally); lỗi upload PDF qu
 
 ---
 
+## v3 — Đăng nhập nhiều người dùng + sao lưu (Phase 6)
+**Date:** 2026-10-26 · **Repo:** tag `v3`
+
+**Added**
+- `app/auth.py` — PBKDF2-SHA256 (240k vòng), bảng `sessions` (token 7 ngày),
+  `setup_first_user()` nhận sentinel `shared` làm tài khoản đầu → dữ liệu chế độ
+  mở không mồ côi khi bật đăng nhập.
+- `app/main.py` — middleware chặn API khi auth bật; `POST /api/setup|login|
+  logout|users`, `GET /api/me`; mọi truy vấn lọc theo `user_id`; documents/
+  versions/diff/download kiểm tra quyền sở hữu (404 cho người ngoài).
+- UI: overlay Đăng nhập, thẻ Tài khoản ở tab Cài đặt, các fetch xử lý 401.
+- `app/backup.py` — zip data (SQLite backup API + generated + uploads + khoá),
+  giữ 10 bản; README có lệnh `schtasks` đặt lịch + cách reset mật khẩu.
+- `tests/test_auth_backup.py` — 4 test (chế độ mở, luồng khóa+cô lập 2 user,
+  thuộc tính băm, backup+rotation).
+
+**Fixed during review:** cleanup test vi phạm khoá ngoại (nguồn "treo" lần chạy
+đầu); tên tệp backup trùng nhau khi chạy cùng giây (rotation hỏng); đơn giản hoá
+logic thừa trong `auth.create_user`; README bổ sung tài liệu đã hứa.
+
+**Verified:** pytest 45/45; eval 10/10; trình duyệt: mở → bật đăng nhập → 401 +
+overlay → đăng nhập lại OK.
+
+---
+
 ### Cách chạy lại
 ```bash
 python -m app.ingest && python -m uvicorn app.main:app --port 8090   # mock, không cần key

@@ -60,13 +60,83 @@ function bindUI() {
   $("#edit-form").addEventListener("submit", onEditSubmit);
   $("#btn-diff").addEventListener("click", onToggleDiff);
   $("#settings-form").addEventListener("submit", onSettingsSubmit);
+  $("#login-form").addEventListener("submit", onLoginSubmit);
+  $("#account-form").addEventListener("submit", onAccountSubmit);
+  $("#btn-logout").addEventListener("click", onLogout);
 
-  // provider badge in the masthead
+  // provider badge in the masthead; login state decides the overlay
   fetch("/api/settings").then((r) => r.json()).then((s) => {
     $("#provider-badge").textContent =
       ({ gemini: "Gemini", openai: "OpenAI", anthropic: "Claude",
          local: "Cục bộ", mock: "Mock" })[s.default_provider] || s.default_provider;
   });
+  refreshLoginState();
+}
+
+// ---------------------------------------------------------------- auth UI
+function showLogin() {
+  $("#login-overlay").hidden = false;
+  $("#login-hint").textContent = "";
+  $("#login-name").focus();
+}
+
+async function refreshLoginState() {
+  const me = await (await fetch("/api/me")).json();
+  const overlay = $("#login-overlay");
+  if (me.auth_enabled && !me.name) {
+    overlay.hidden = false;
+  } else {
+    overlay.hidden = true;
+  }
+  $("#account-open").hidden = me.auth_enabled;
+  $("#account-logged").hidden = !me.auth_enabled;
+  $("#account-who").textContent = me.name
+    ? `Đã đăng nhập: ${me.name}` : "";
+}
+
+async function onLoginSubmit(ev) {
+  ev.preventDefault();
+  const resp = await fetch("/api/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: $("#login-name").value, password: $("#login-password").value,
+    }),
+  });
+  if (resp.ok) {
+    location.reload();
+  } else {
+    $("#login-hint").textContent = "Sai tên đăng nhập hoặc mật khẩu.";
+  }
+}
+
+async function onAccountSubmit(ev) {
+  ev.preventDefault();
+  const resp = await fetch("/api/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      name: $("#acc-name").value, password: $("#acc-password").value,
+    }),
+  });
+  const body = await resp.json().catch(() => ({}));
+  $("#account-status").textContent = resp.ok
+    ? "Đã bật đăng nhập — tài khoản này sở hữu toàn bộ dữ liệu hiện có."
+    : (body.detail || `Lỗi HTTP ${resp.status}`);
+  if (resp.ok) refreshLoginState();
+}
+
+async function onLogout() {
+  await fetch("/api/logout", { method: "POST" });
+  location.reload();
+}
+
+function unauthorized(resp) {
+  if (resp.status === 401) {
+    showLogin();
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------- settings
@@ -132,6 +202,7 @@ async function onSubmit(ev) {
   resetProgress();
   try {
     const resp = await fetch("/api/generate", { method: "POST", body: new FormData(form) });
+    if (unauthorized(resp)) return;
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       addProgress(err.detail || `Lỗi HTTP ${resp.status}`, "error");
@@ -198,6 +269,7 @@ async function onEditSubmit(ev) {
     body.append("instruction", instruction);
     const resp = await fetch(`/api/documents/${currentDoc.document.id}/edit`,
       { method: "POST", body });
+    if (unauthorized(resp)) return;
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       appendChat("assistant", err.detail || `Lỗi HTTP ${resp.status}`);
@@ -299,7 +371,7 @@ async function onToggleDiff() {
 // ---------------------------------------------------------------- document view
 async function openDocument(documentId, preferredVersionId = null) {
   const resp = await fetch(`/api/documents/${documentId}`);
-  if (!resp.ok) return;
+  if (unauthorized(resp) || !resp.ok) return;
   currentDoc = await resp.json();
   currentDoc.versions.sort((a, b) => b.version - a.version);
 
@@ -337,6 +409,7 @@ async function openDocument(documentId, preferredVersionId = null) {
 async function showVersion(v) {
   currentVersion = v;
   const resp = await fetch(`/api/versions/${v.id}/preview`);
+  if (unauthorized(resp)) return;
   if (!resp.ok) {
     $("#doc-content").textContent = "Không tải được nội dung phiên bản này.";
     return;
@@ -397,6 +470,7 @@ function renderDocument(doc) {
 // ---------------------------------------------------------------- history
 async function loadHistory() {
   const resp = await fetch("/api/conversations");
+  if (unauthorized(resp)) return;
   const rows = await resp.json();
   const ul = $("#history-list");
   ul.innerHTML = "";

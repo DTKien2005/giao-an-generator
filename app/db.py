@@ -11,7 +11,15 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    expires_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS conversations (
@@ -117,9 +125,19 @@ def get_conn() -> sqlite3.Connection:
 def init_db() -> None:
     conn = get_conn()
     conn.executescript(SCHEMA)
+    _migrate(conn)
+    # Sentinel row for open mode (no password): keeps FKs valid and holds all
+    # pre-auth data; POST /api/setup later claims/renames this row.
     if not conn.execute("SELECT 1 FROM users WHERE id = 1").fetchone():
-        conn.execute("INSERT INTO users (id, name) VALUES (1, 'default')")
+        conn.execute("INSERT INTO users (id, name, password_hash) VALUES (1, 'shared', '')")
     conn.commit()
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Lightweight migrations for databases created before a feature existed."""
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
+    if "password_hash" not in columns:
+        conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
 
 
 @contextmanager

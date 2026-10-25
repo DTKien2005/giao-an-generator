@@ -67,6 +67,32 @@ python -m app.evaluate           # chạy với mock; thêm --provider gemini kh
 pip install -r requirements.txt
 ```
 
+## Đăng nhập (từ v3)
+
+Mặc định app chạy **mở** (không đăng nhập) đúng như trước. Vào tab **Cài đặt →
+Tài khoản** tạo tài khoản đầu tiên để bật đăng nhập: tài khoản đó **kế thừa toàn
+bộ dữ liệu** đã tạo trong chế độ mở; sau đó mọi API yêu cầu đăng nhập, mỗi người
+chỉ thấy hội thoại/tài liệu của mình. Người đã đăng nhập có thể tạo thêm người
+dùng (tab Cài đặt → Tài khoản). Mật khẩu băm PBKDF2-SHA256 (240.000 vòng).
+
+Quên mật khẩu (app cục bộ): dừng server rồi chạy
+`python -c "from app import db,auth; c=db.get_conn(); c.execute(\"DELETE FROM sessions\"); c.execute(\"DELETE FROM users\"); c.execute(\"INSERT INTO users (id,name,password_hash) VALUES (1,'shared','')\"); c.commit()"`
+— app quay về chế độ mở, tạo lại tài khoản mới (dữ liệu cũ vẫn thuộc sentinel).
+
+## Sao lưu dữ liệu (từ v3)
+
+```bash
+python -m app.backup     # tạo data/backups/backup_<thời_gian>.zip, giữ 10 bản gần nhất
+```
+
+Tệp zip chứa database (chụp nhất quán qua SQLite backup API), thư mục tài liệu
+đã sinh, tệp tải lên và khoá mã hoá. Đặt lịch hằng ngày trên Windows (Task
+Scheduler): chạy `python -m app.backup` trong thư mục dự án lúc 23:00.
+
+```bat
+schtasks /Create /SC DAILY /ST 23:00 /TN "GiaoAnBackup" /TR "cd /d H:\Web_Lam_Giao_An_Bang_Gemini && python -m app.backup"
+```
+
 ## Biến môi trường
 
 | Biến | Ý nghĩa | Mặc định |

@@ -191,6 +191,29 @@
           <p class="hint">Khoá API được mã hoá trước khi lưu vào máy bạn. Mỗi vai trò (Writer/Reviewer/Reviser) có thể dùng một mô hình riêng — nên để Reviewer khác Writer để thẩm định khách quan hơn.</p>
           <p class="hint" id="settings-status"></p>
         </form>
+
+        <form class="card" id="account-form" autocomplete="off">
+          <h2 class="card-title">Tài khoản</h2>
+          <div id="account-open" class="account-state">
+            <p class="hint">Chưa bật đăng nhập. Tạo tài khoản đầu tiên để khoá app: mọi dữ liệu đã có sẽ thuộc về tài khoản đó.</p>
+            <div class="field-row">
+              <label class="field">
+                <span>Tên đăng nhập</span>
+                <input type="text" id="acc-name">
+              </label>
+              <label class="field">
+                <span>Mật khẩu</span>
+                <input type="password" id="acc-password">
+              </label>
+            </div>
+            <button type="submit" class="btn-primary">Bật đăng nhập</button>
+          </div>
+          <div id="account-logged" hidden>
+            <p class="hint" id="account-who"></p>
+            <button type="button" class="btn-primary" id="btn-logout">Đăng xuất</button>
+          </div>
+          <p class="hint" id="account-status"></p>
+        </form>
       </div>
     </section>
   </main>
@@ -198,6 +221,22 @@
   <footer class="colophon">
     Chạy cục bộ · dữ liệu lưu trong <code>data/app.db</code> · Gemini mặc định, đổi nhà cung cấp ở phần Cài đặt (v0.6)
   </footer>
+
+  <div id="login-overlay" class="login-overlay" hidden>
+    <form class="card login-card" id="login-form" autocomplete="off">
+      <h2 class="card-title">Đăng nhập</h2>
+      <label class="field">
+        <span>Tên đăng nhập</span>
+        <input type="text" id="login-name" autocomplete="username">
+      </label>
+      <label class="field">
+        <span>Mật khẩu</span>
+        <input type="password" id="login-password" autocomplete="current-password">
+      </label>
+      <button type="submit" class="btn-primary">Đăng nhập</button>
+      <p class="hint" id="login-hint"></p>
+    </form>
+  </div>
 </div>
 <script src="/static/app.js"></script>
 </body>

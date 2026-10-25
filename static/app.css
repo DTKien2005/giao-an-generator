@@ -421,3 +421,21 @@ textarea { resize: vertical; }
   text-align: center;
 }
 .colophon code { background: var(--paper-deep); padding: 1px 5px; border-radius: 3px; }
+
+/* ---------------- login overlay ---------------- */
+.login-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(28, 43, 74, .45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  backdrop-filter: blur(2px);
+}
+.login-card {
+  width: min(360px, 90vw);
+  margin: 0;
+  box-shadow: 6px 8px 0 rgba(0, 0, 0, .25);
+}
+.account-state .hint { margin-top: 0; }

@@ -18,14 +18,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
-from . import config, db, keys
+from . import auth, config, db, keys
 from .diffing import diff_documents
 from .formats import extract_format_spec
 from .ingest import file_to_text
-from .pipeline import MissingInfoError, run_edit, run_full_pipeline
+from .pipeline import MissingInfoError, PipelineError, run_edit, run_full_pipeline
 
 
 @asynccontextmanager
@@ -39,6 +39,85 @@ app = FastAPI(title="Soạn Giáo Án & Phiếu Bài Tập", lifespan=lifespan)
 _STATIC = Path(__file__).resolve().parent.parent / "static"
 _TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
 app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+
+# ---------------------------------------------------------------------------
+# Auth: progressive — open mode until the first account exists (plan §9-P6)
+# ---------------------------------------------------------------------------
+COOKIE_NAME = "ga_session"
+
+
+def _session_token(request: Request) -> str | None:
+    return request.cookies.get(COOKIE_NAME)
+
+
+def current_user(request: Request):
+    """The logged-in user, the shared sentinel in open mode, or None."""
+    return auth.session_user(_session_token(request)) or (
+        db.get_conn().execute("SELECT id, name FROM users WHERE id = 1").fetchone()
+        if not auth.auth_enabled() else None
+    )
+
+
+@app.middleware("http")
+async def auth_guard(request: Request, call_next):
+    path = request.url.path
+    public = path in ("/", "/api/setup", "/api/login", "/api/me") or path.startswith("/static")
+    if not public and path.startswith("/api/") and auth.auth_enabled():
+        if auth.session_user(_session_token(request)) is None:
+            return JSONResponse({"detail": "Cần đăng nhập"}, status_code=401)
+    return await call_next(request)
+
+
+@app.get("/api/me")
+def me(request: Request):
+    user = auth.session_user(_session_token(request))
+    return {"name": user["name"] if user else None,
+            "auth_enabled": auth.auth_enabled()}
+
+
+@app.post("/api/setup")
+async def setup(payload: dict):
+    try:
+        auth.setup_first_user(str(payload.get("name", "")), str(payload.get("password", "")))
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(400 if isinstance(exc, ValueError) else 409, str(exc))
+    token = auth.login(str(payload["name"]), str(payload["password"]))
+    response = JSONResponse({"ok": True, "name": payload["name"]})
+    response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=7 * 24 * 3600)
+    return response
+
+
+@app.post("/api/login")
+async def login(payload: dict):
+    token = auth.login(str(payload.get("name", "")), str(payload.get("password", "")))
+    if not token:
+        raise HTTPException(401, "Sai tên đăng nhập hoặc mật khẩu")
+    response = JSONResponse({"ok": True})
+    response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=7 * 24 * 3600)
+    return response
+
+
+@app.post("/api/logout")
+async def logout(request: Request):
+    token = _session_token(request)
+    if token:
+        auth.logout(token)
+    response = JSONResponse({"ok": True})
+    response.delete_cookie(COOKIE_NAME)
+    return response
+
+
+@app.post("/api/users")
+async def add_user(payload: dict, request: Request):
+    if not auth.auth_enabled():
+        raise HTTPException(400, "Chưa bật đăng nhập — dùng /api/setup trước")
+    if auth.session_user(_session_token(request)) is None:
+        raise HTTPException(401, "Cần đăng nhập để tạo người dùng mới")
+    try:
+        user_id = auth.create_user(str(payload.get("name", "")), str(payload.get("password", "")))
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"id": user_id}
 
 # run_id → {"subs": [queue…], "done": bool, "result": …, "error": …}
 _live_runs: dict[int, dict] = {}
@@ -144,6 +223,19 @@ def index() -> str:
     return (_TEMPLATES / "index.html").read_text(encoding="utf-8")
 
 
+def _own_document(document_id: int, user):
+    """A document visible to this user, or 404 (also hides other users' data)."""
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT d.* FROM documents d JOIN conversations c ON c.id = d.conversation_id"
+        " WHERE d.id = ? AND c.user_id = ?",
+        (document_id, user["id"]),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Không tìm thấy tài liệu")
+    return row
+
+
 @app.post("/api/generate")
 async def generate(
     request: Request,
@@ -155,6 +247,9 @@ async def generate(
     doc_type: str = Form(""),
     file: UploadFile | None = File(None),
 ):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
     _check_rate_limit(request)
     source_text = text or ""
     user_spec = None
@@ -181,7 +276,8 @@ async def generate(
             request["format_spec"] = cached
 
     def job(run_id: int, progress):
-        return run_full_pipeline(request, source_text, progress=progress, run_id=run_id)
+        return run_full_pipeline(request, source_text, progress=progress,
+                                 run_id=run_id, user_id=user["id"])
 
     run_id = _start_run("full", job)
     return {"run_id": run_id}
@@ -189,13 +285,14 @@ async def generate(
 
 @app.post("/api/documents/{document_id}/edit")
 async def edit_document(document_id: int, instruction: str = Form(...), request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
     _check_rate_limit(request)
     instruction = instruction.strip()
     if not instruction:
         raise HTTPException(400, "Hãy ghi yêu cầu chỉnh sửa.")
-    conn = db.get_conn()
-    if not conn.execute("SELECT 1 FROM documents WHERE id = ?", (document_id,)).fetchone():
-        raise HTTPException(404, "Không tìm thấy tài liệu")
+    _own_document(document_id, user)
 
     def job(run_id: int, progress):
         return run_edit(document_id, instruction, progress=progress, run_id=run_id)
@@ -205,7 +302,11 @@ async def edit_document(document_id: int, instruction: str = Form(...), request:
 
 
 @app.get("/api/documents/{document_id}/diff")
-def document_diff(document_id: int, from_version: int, to_version: int):
+def document_diff(document_id: int, from_version: int, to_version: int, request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    _own_document(document_id, user)
     conn = db.get_conn()
     rows = conn.execute(
         "SELECT version, content FROM document_versions"
@@ -255,38 +356,64 @@ def run_status(run_id: int):
 
 
 @app.get("/api/conversations")
-def conversations():
+def conversations(request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
     rows = db.get_conn().execute(
         "SELECT c.id, c.title, c.updated_at,"
         " (SELECT COUNT(*) FROM documents d WHERE d.conversation_id = c.id) AS documents"
-        " FROM conversations c ORDER BY c.updated_at DESC LIMIT 100"
+        " FROM conversations c WHERE c.user_id = ?"
+        " ORDER BY c.updated_at DESC LIMIT 100",
+        (user["id"],),
     ).fetchall()
     return [dict(r) for r in rows]
 
 
 @app.get("/api/conversations/{conversation_id}/documents")
-def conversation_documents(conversation_id: int):
+def conversation_documents(conversation_id: int, request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
     rows = db.get_conn().execute(
-        "SELECT id, title, doc_type, grade, subject FROM documents"
-        " WHERE conversation_id = ? ORDER BY id DESC",
-        (conversation_id,),
+        "SELECT d.id, d.title, d.doc_type, d.grade, d.subject FROM documents d"
+        " JOIN conversations c ON c.id = d.conversation_id"
+        " WHERE d.conversation_id = ? AND c.user_id = ? ORDER BY d.id DESC",
+        (conversation_id, user["id"]),
     ).fetchall()
     return [dict(r) for r in rows]
 
 
-@app.get("/api/versions/{version_id}/preview")
-def version_preview(version_id: int):
-    row = db.get_conn().execute(
-        "SELECT content FROM document_versions WHERE id = ?", (version_id,)).fetchone()
+def _own_version(version_id: int, user):
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT v.* FROM document_versions v"
+        " JOIN documents d ON d.id = v.document_id"
+        " JOIN conversations c ON c.id = d.conversation_id"
+        " WHERE v.id = ? AND c.user_id = ?",
+        (version_id, user["id"]),
+    ).fetchone()
     if not row:
         raise HTTPException(404, "Không tìm thấy phiên bản")
+    return row
+
+
+@app.get("/api/versions/{version_id}/preview")
+def version_preview(version_id: int, request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    row = _own_version(version_id, user)
     return json.loads(row["content"])
 
 
 @app.get("/api/documents/{document_id}")
-def document_detail(document_id: int):
+def document_detail(document_id: int, request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    doc = _own_document(document_id, user)
     conn = db.get_conn()
-    doc = conn.execute("SELECT * FROM documents WHERE id = ?", (document_id,)).fetchone()
     if not doc:
         raise HTTPException(404, "Không tìm thấy tài liệu")
     versions = conn.execute(
@@ -304,11 +431,11 @@ def document_detail(document_id: int):
 
 
 @app.get("/api/versions/{version_id}/download")
-def download(version_id: int, fmt: str = "docx"):
-    row = db.get_conn().execute(
-        "SELECT * FROM document_versions WHERE id = ?", (version_id,)).fetchone()
-    if not row:
-        raise HTTPException(404, "Không tìm thấy phiên bản")
+def download(version_id: int, fmt: str = "docx", request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    row = _own_version(version_id, user)
     path = row["file_docx"] if fmt == "docx" else row["file_pdf"]
     if not path or not Path(path).exists():
         raise HTTPException(404, f"Chưa có tệp {fmt.upper()} cho phiên bản này")
