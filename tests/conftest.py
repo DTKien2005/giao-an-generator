@@ -26,6 +26,22 @@ def _init_database():
     yield
 
 
+def reset_auth_state():
+    """Return the suite to open mode after a test enabled auth. Deletes
+    dependent rows in FK order and never leaves an open transaction behind
+    (a failed cleanup once held a write lock and broke every later test)."""
+    conn = db.get_conn()
+    try:
+        for table in ("run_rounds", "jobs", "runs", "messages", "document_versions",
+                      "documents", "conversations", "sessions", "users"):
+            conn.execute(f"DELETE FROM {table}")
+        conn.execute("INSERT INTO users (id, name, password_hash) VALUES (1, 'shared', '')")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+
+
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as c:  # context manager → lifespan → db.init_db()

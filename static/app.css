@@ -400,7 +400,30 @@ textarea { resize: vertical; }
   color: var(--ink);
   cursor: pointer;
   text-align: left;
+  position: relative;
 }
+.conv-delete {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--pencil);
+  border-radius: 50%;
+  background: #fffdf6;
+  color: var(--accent);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .15s;
+}
+.history-list li:hover .conv-delete { opacity: 1; }
+.conv-delete:hover { background: var(--accent); color: var(--paper); }
+.btn-restore { border-color: var(--accent); color: var(--accent); }
+.btn-restore:hover { background: var(--accent); color: var(--paper); }
+.btn-restore:disabled { opacity: .5; cursor: wait; }
 .history-list button:hover { background: rgba(28, 43, 74, .06); }
 .history-list .when { color: var(--ink-soft); font-size: 12.5px; white-space: nowrap; }
 .history-list .badge {

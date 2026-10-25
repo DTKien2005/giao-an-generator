@@ -59,6 +59,7 @@ function bindUI() {
 
   $("#edit-form").addEventListener("submit", onEditSubmit);
   $("#btn-diff").addEventListener("click", onToggleDiff);
+  $("#btn-restore").addEventListener("click", onRestore);
   $("#settings-form").addEventListener("submit", onSettingsSubmit);
   $("#login-form").addEventListener("submit", onLoginSubmit);
   $("#account-form").addEventListener("submit", onAccountSubmit);
@@ -327,6 +328,36 @@ function appendChat(role, content) {
   ul.scrollTop = ul.scrollHeight;
 }
 
+// ---------------------------------------------------------------- restore
+async function onRestore() {
+  if (!currentVersion || !confirm("Phục hồi nội dung phiên bản này thành phiên bản mới nhất?")) return;
+  const btn = $("#btn-restore");
+  btn.disabled = true;
+  resetProgress();
+  try {
+    const resp = await fetch(`/api/versions/${currentVersion.id}/restore`, { method: "POST" });
+    if (unauthorized(resp)) return;
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      addProgress(err.detail || `Lỗi HTTP ${resp.status}`, "error");
+      return;
+    }
+    const { run_id } = await resp.json();
+    const es = new EventSource(`/api/runs/${run_id}/events`);
+    es.onmessage = (ev) => {
+      const data = JSON.parse(ev.data);
+      if (data.type === "progress") addProgress(data.label);
+      else if (data.type === "done") {
+        markLastDone(); addProgress("Đã phục hồi!", "done"); es.close();
+        openDocument(data.result.document_id, data.result.version_id);
+      } else if (data.type === "error") { addProgress(data.error, "error"); es.close(); }
+    };
+    es.onerror = () => es.close();
+  } finally {
+    btn.disabled = false;
+  }
+}
+
 // ---------------------------------------------------------------- diff
 async function onToggleDiff() {
   const view = $("#diff-view");
@@ -408,6 +439,9 @@ async function openDocument(documentId, preferredVersionId = null) {
 
 async function showVersion(v) {
   currentVersion = v;
+  // restore is offered only for an older version, with history to roll back from
+  $("#btn-restore").hidden = !(currentDoc.versions.length > 1
+    && currentDoc.versions[0].id !== v.id);
   const resp = await fetch(`/api/versions/${v.id}/preview`);
   if (unauthorized(resp)) return;
   if (!resp.ok) {
@@ -483,6 +517,17 @@ async function loadHistory() {
     const btn = document.createElement("button");
     btn.innerHTML = `<span><span class="badge">${c.documents} tài liệu</span>${esc(c.title)}</span>` +
       `<span class="when">${esc(c.updated_at)}</span>`;
+    const del = document.createElement("button");
+    del.className = "conv-delete";
+    del.title = "Xoá cuộc trò chuyện";
+    del.textContent = "✕";
+    del.addEventListener("click", async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Xoá (ẩn) cuộc trò chuyện "${c.title}"?`)) return;
+      const resp = await fetch(`/api/conversations/${c.id}`, { method: "DELETE" });
+      if (resp.ok) loadHistory();
+    });
+    btn.appendChild(del);
     btn.addEventListener("click", async () => {
       const r = await fetch(`/api/conversations/${c.id}/documents`);
       const docs = await r.json();

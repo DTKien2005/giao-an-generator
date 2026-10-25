@@ -23,9 +23,9 @@ from fastapi.staticfiles import StaticFiles
 
 from . import auth, config, db, keys
 from .diffing import diff_documents
-from .formats import extract_format_spec
+from .formats import default_format_spec, extract_format_spec
 from .ingest import file_to_text
-from .pipeline import MissingInfoError, PipelineError, run_edit, run_full_pipeline
+from .pipeline import MissingInfoError, PipelineError, run_edit, run_full_pipeline, save_version
 
 
 @asynccontextmanager
@@ -301,6 +301,61 @@ async def edit_document(document_id: int, instruction: str = Form(...), request:
     return {"run_id": run_id}
 
 
+@app.post("/api/versions/{version_id}/restore")
+async def restore_version(version_id: int, request: Request = None):
+    """Non-destructive rollback (plan §5): an old version's content is saved as
+    a NEW version — the audit trail and diffs stay intact."""
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    version = _own_version(version_id, user)
+
+    def job(run_id: int, progress):
+        _publish(run_id, {"type": "progress", "label": "Phục hồi phiên bản…"})
+        document = json.loads(version["content"])
+        conn = db.get_conn()
+        spec_json = conn.execute(
+            "SELECT format_spec FROM documents WHERE id = ?",
+            (version["document_id"],)).fetchone()["format_spec"]
+        format_spec = json.loads(spec_json) if spec_json else \
+            default_format_spec(document.get("doc_type", "lesson_plan"))
+        new_version_id = save_version(
+            version["document_id"], document, format_spec,
+            f"Phục hồi từ v{version['version']}")
+        conn.execute(
+            "UPDATE runs SET document_id = ? WHERE id = ?", (version["document_id"], run_id))
+        conn.execute(
+            "INSERT INTO messages (conversation_id, role, content) VALUES"
+            " ((SELECT conversation_id FROM documents WHERE id = ?), 'assistant', ?)",
+            (version["document_id"], f"Đã phục hồi nội dung phiên bản v{version['version']}."))
+        conn.commit()
+        _publish(run_id, {"type": "progress", "label": "Kết xuất tệp Word và PDF…"})
+        return {"conversation_id": None, "document_id": version["document_id"],
+                "version_id": new_version_id, "document": document,
+                "review_summary": f"Đã phục hồi từ v{version['version']}", "kind": "restore"}
+
+    run_id = _start_run("restore", job)
+    return {"run_id": run_id}
+
+
+@app.delete("/api/conversations/{conversation_id}")
+def delete_conversation(conversation_id: int, request: Request = None):
+    """Soft delete: hidden from the list, data and files kept."""
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    conn = db.get_conn()
+    row = conn.execute(
+        "SELECT id FROM conversations WHERE id = ? AND user_id = ? AND deleted_at IS NULL",
+        (conversation_id, user["id"])).fetchone()
+    if not row:
+        raise HTTPException(404, "Không tìm thấy cuộc trò chuyện")
+    conn.execute("UPDATE conversations SET deleted_at = datetime('now') WHERE id = ?",
+                 (conversation_id,))
+    conn.commit()
+    return {"ok": True}
+
+
 @app.get("/api/documents/{document_id}/diff")
 def document_diff(document_id: int, from_version: int, to_version: int, request: Request = None):
     user = current_user(request)
@@ -363,7 +418,7 @@ def conversations(request: Request = None):
     rows = db.get_conn().execute(
         "SELECT c.id, c.title, c.updated_at,"
         " (SELECT COUNT(*) FROM documents d WHERE d.conversation_id = c.id) AS documents"
-        " FROM conversations c WHERE c.user_id = ?"
+        " FROM conversations c WHERE c.user_id = ? AND c.deleted_at IS NULL"
         " ORDER BY c.updated_at DESC LIMIT 100",
         (user["id"],),
     ).fetchall()

@@ -7,17 +7,11 @@ import zipfile
 
 from fastapi.testclient import TestClient
 
+from conftest import reset_auth_state
 from app import auth, backup, db
 from app.main import app
 
-
-def _reset_auth_state():
-    conn = db.get_conn()
-    for table in ("run_rounds", "jobs", "runs", "messages", "document_versions",
-                  "documents", "conversations", "sessions", "users"):
-        conn.execute(f"DELETE FROM {table}")
-    conn.execute("INSERT INTO users (id, name, password_hash) VALUES (1, 'shared', '')")
-    conn.commit()
+_reset_auth_state = reset_auth_state
 
 
 def test_open_mode_without_users():

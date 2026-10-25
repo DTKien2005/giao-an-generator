@@ -324,6 +324,26 @@ overlay → đăng nhập lại OK.
 
 ---
 
+## v4 — Phục hồi phiên bản + quản lý hội thoại
+**Date:** 2026-10-26 · **Repo:** tag `v4`
+
+**Added**
+- `POST /api/versions/{id}/restore` — rollback không phá vỡ lịch sử: nội dung
+  bản cũ thành v mới + kết xuất lại + ghi hội thoại; SSE tiến độ; chặn user khác.
+- `DELETE /api/conversations/{id}` — xoá mềm (`deleted_at`), ẩn khỏi Lịch sử.
+- UI: nút "↩ Phục hồi phiên bản này" (chỉ hiện với bản cũ hơn), nút ✕ xoá hội
+  thoại có xác nhận.
+- `tests/test_rollback.py` (3 test); cleanup auth chuẩn hóa về conftest dùng chung.
+
+**Fixed during review:** teardown FK (lần 2 — chuẩn hóa hàm dùng chung); tự xé
+mất decorator `@app.get(.../diff)` khi chèn endpoint (route chết 404); logic
+hiện nút Phục hồi đặt nhầm chỗ (openDocument → showVersion) nên không cập nhật
+theo dropdown.
+
+**Verified:** pytest 48/48; eval 10/10; trình duyệt xác minh đủ luồng restore.
+
+---
+
 ### Cách chạy lại
 ```bash
 python -m app.ingest && python -m uvicorn app.main:app --port 8090   # mock, không cần key

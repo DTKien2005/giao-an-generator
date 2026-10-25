@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS conversations (
     user_id INTEGER NOT NULL REFERENCES users(id),
     title TEXT NOT NULL DEFAULT 'Cuộc trò chuyện mới',
     summary TEXT NOT NULL DEFAULT '',      -- running LLM summary, not full history
+    deleted_at TEXT,                       -- soft delete (v4): NULL = alive
     created_at TEXT NOT NULL DEFAULT (datetime('now')),
     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -138,6 +139,9 @@ def _migrate(conn: sqlite3.Connection) -> None:
     columns = {row[1] for row in conn.execute("PRAGMA table_info(users)")}
     if "password_hash" not in columns:
         conn.execute("ALTER TABLE users ADD COLUMN password_hash TEXT NOT NULL DEFAULT ''")
+    conv_columns = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
+    if "deleted_at" not in conv_columns:
+        conn.execute("ALTER TABLE conversations ADD COLUMN deleted_at TEXT")
 
 
 @contextmanager
