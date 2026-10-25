@@ -344,6 +344,27 @@ theo dropdown.
 
 ---
 
+## v5 — Docker, CI GitHub Actions, tài liệu triển khai
+**Date:** 2026-10-26 · **Repo:** tag `v5`
+
+**Added**
+- `Dockerfile` (python:3.12-slim, non-root, volume `/srv/data`, HEALTHCHECK) +
+  `.dockerignore`.
+- `.github/workflows/ci.yml` — file mới hoàn toàn: pytest + bộ đánh giá trên
+  Python 3.12, mock provider, không cần khoá. Chạy mỗi push/PR vào `main`.
+- `docs/DEPLOY.md` — laptop, Cloudflare Tunnel, Docker, lịch backup, nâng cấp.
+- **Fix do CI bắt được:** font PDF cũ chỉ trỏ `C:\Windows\Fonts` → mọi render
+  PDF chết trên Linux. Vendored IBM Plex Serif (OFL, đủ glyph tiếng Việt — kiểm
+  `has_glyph`) vào `assets/fonts/` làm font chính + family đậm; Windows chỉ còn
+  fallback.
+
+**Verified:** **CI GitHub xanh**; pytest 48/48 trên cả Python 3.14 và 3.12;
+eval 10/10; 5 tag v1–v5 trên remote. Docker daemon cục bộ không khởi động được
+nên build ảnh được ghi nhận trung thực là "đã soát, chưa chạy local" — CI chạy
+cùng base image python:3.12.
+
+---
+
 ### Cách chạy lại
 ```bash
 python -m app.ingest && python -m uvicorn app.main:app --port 8090   # mock, không cần key
