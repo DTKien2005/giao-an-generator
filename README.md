@@ -133,6 +133,13 @@ Actions) chạy pytest + bộ đánh giá tự động (provider mock, không c�
 | `APP_DATA_DIR` | thư mục dữ liệu (SQLite, tệp sinh ra, khoá mã hoá) | `./data` |
 | `APP_DATASET_DIR` | thư mục dataset | `./dataset` |
 | `APP_RATE_LIMIT` | số lượt chạy / 10 phút / máy (giới hạn chi phí) | 10 |
+| `APP_TRUST_PROXY` | `1` = tin `CF-Connecting-IP` từ loopback (đằng sau tunnel) | 0 |
+| `APP_SETUP_TOKEN` | bắt buộc khi tạo tài khoản đầu tiên (chống chiếm quyền) | — |
+| `APP_COOKIE_SECURE` | `1` = cookie phiên chỉ qua HTTPS (production) | 0 |
+| `APP_BACKUP_COPY_DIR` | copy zip backup ra ngoài đĩa (thư mục riêng tư) | — |
+
+Runbook go-live lên `https://giaoan.kinzz-server.io.vn` (Cloudflare Tunnel +
+Access + Task Scheduler): xem [docs/DEPLOY.md](docs/DEPLOY.md).
 
 ## Bản quyền & nguồn
 

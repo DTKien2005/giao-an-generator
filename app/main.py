@@ -9,6 +9,8 @@ Endpoints
 - GET  /api/documents/{id}   → document + versions
 - GET  /api/versions/{id}/download?fmt=docx|pdf
 """
+import hmac
+import ipaddress
 import json
 import queue
 import threading
@@ -31,6 +33,11 @@ from .pipeline import MissingInfoError, PipelineError, run_edit, run_full_pipeli
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     db.init_db()
+    # Startup reconciliation: a crash/reboot leaves runs queued/running forever.
+    db.get_conn().execute(
+        "UPDATE runs SET status = 'error', error = 'Ứng dụng khởi động lại giữa chừng'"
+        " WHERE status IN ('queued', 'running')")
+    db.get_conn().commit()
     yield
 
 
@@ -44,6 +51,13 @@ app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
 # Auth: progressive — open mode until the first account exists (plan §9-P6)
 # ---------------------------------------------------------------------------
 COOKIE_NAME = "ga_session"
+
+
+def _session_cookie_params() -> dict:
+    """HttpOnly + SameSite=Lax always; Secure only in production (plain-http dev
+    on 127.0.0.1 would drop a Secure cookie)."""
+    return {"httponly": True, "samesite": "lax", "max_age": 7 * 24 * 3600,
+            "secure": bool(config.COOKIE_SECURE)}
 
 
 def _session_token(request: Request) -> str | None:
@@ -61,7 +75,8 @@ def current_user(request: Request):
 @app.middleware("http")
 async def auth_guard(request: Request, call_next):
     path = request.url.path
-    public = path in ("/", "/api/setup", "/api/login", "/api/me") or path.startswith("/static")
+    public = (path in ("/", "/api/setup", "/api/login", "/api/me", "/healthz")
+              or path.startswith("/static"))
     if not public and path.startswith("/api/") and auth.auth_enabled():
         if auth.session_user(_session_token(request)) is None:
             return JSONResponse({"detail": "Cần đăng nhập"}, status_code=401)
@@ -72,28 +87,38 @@ async def auth_guard(request: Request, call_next):
 def me(request: Request):
     user = auth.session_user(_session_token(request))
     return {"name": user["name"] if user else None,
-            "auth_enabled": auth.auth_enabled()}
+            "auth_enabled": auth.auth_enabled(),
+            "setup_token_required": bool(config.SETUP_TOKEN)}
 
 
 @app.post("/api/setup")
-async def setup(payload: dict):
+async def setup(payload: dict, request: Request = None):
+    _check_login_throttle(request)  # CPU guard: each attempt costs a PBKDF2 hash
+    if auth.auth_enabled():
+        raise HTTPException(409, "Đã có người dùng — dùng /api/login")
+    if config.SETUP_TOKEN:
+        supplied = str(payload.get("setup_token", ""))
+        if not hmac.compare_digest(supplied.encode("utf-8"),
+                                   config.SETUP_TOKEN.encode("utf-8")):
+            raise HTTPException(403, "Sai setup token")
     try:
         auth.setup_first_user(str(payload.get("name", "")), str(payload.get("password", "")))
     except (PermissionError, ValueError) as exc:
         raise HTTPException(400 if isinstance(exc, ValueError) else 409, str(exc))
     token = auth.login(str(payload["name"]), str(payload["password"]))
     response = JSONResponse({"ok": True, "name": payload["name"]})
-    response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=7 * 24 * 3600)
+    response.set_cookie(COOKIE_NAME, token, **_session_cookie_params())
     return response
 
 
 @app.post("/api/login")
-async def login(payload: dict):
+async def login(payload: dict, request: Request = None):
+    _check_login_throttle(request)
     token = auth.login(str(payload.get("name", "")), str(payload.get("password", "")))
     if not token:
         raise HTTPException(401, "Sai tên đăng nhập hoặc mật khẩu")
     response = JSONResponse({"ok": True})
-    response.set_cookie(COOKIE_NAME, token, httponly=True, samesite="lax", max_age=7 * 24 * 3600)
+    response.set_cookie(COOKIE_NAME, token, **_session_cookie_params())
     return response
 
 
@@ -111,17 +136,36 @@ async def logout(request: Request):
 async def add_user(payload: dict, request: Request):
     if not auth.auth_enabled():
         raise HTTPException(400, "Chưa bật đăng nhập — dùng /api/setup trước")
-    if auth.session_user(_session_token(request)) is None:
+    user = auth.session_user(_session_token(request))
+    if user is None:
         raise HTTPException(401, "Cần đăng nhập để tạo người dùng mới")
+    if user["id"] != 1:
+        raise HTTPException(403, "Chỉ tài khoản đầu tiên mới được tạo người dùng mới")
     try:
         user_id = auth.create_user(str(payload.get("name", "")), str(payload.get("password", "")))
     except ValueError as exc:
         raise HTTPException(400, str(exc))
     return {"id": user_id}
 
-# run_id → {"subs": [queue…], "done": bool, "result": …, "error": …}
+
+@app.get("/healthz")
+def healthz():
+    """Liveness only: no auth, no data, no DB call (plan WP3 / Codex R1-24)."""
+    return {"ok": True}
+
+# run_id → {"subs": [queue…], "done": bool, "result": …, "error": …, "user_id": int|None}
 _live_runs: dict[int, dict] = {}
 _lock = threading.Lock()
+_LIVE_RUNS_CAP = 100
+
+
+def _prune_live_runs_locked() -> None:
+    """Bound memory (Codex R1-14): drop the oldest finished runs past the cap."""
+    if len(_live_runs) <= _LIVE_RUNS_CAP:
+        return
+    finished = [rid for rid, e in _live_runs.items() if e["done"]]
+    for rid in finished[: max(0, len(_live_runs) - _LIVE_RUNS_CAP)]:
+        del _live_runs[rid]
 
 
 def _publish(run_id: int, payload: dict) -> None:
@@ -132,11 +176,13 @@ def _publish(run_id: int, payload: dict) -> None:
 
 
 def _finish(run_id: int, result: dict | None, error: str | None) -> None:
-    _publish(run_id, {"type": "done" if result else "error",
-                      **({"result": result} if result else {"error": error})})
     with _lock:
         entry = _live_runs[run_id]
+        # record the terminal state BEFORE publishing, so a subscriber that
+        # attaches in between sees done=True instead of waiting forever (R2-1)
         entry["done"], entry["result"], entry["error"] = True, result, error
+    _publish(run_id, {"type": "done" if result else "error",
+                      **({"result": result} if result else {"error": error})})
 
 
 def _worker(run_id: int, job) -> None:
@@ -164,25 +210,51 @@ def _worker(run_id: int, job) -> None:
         _finish(run_id, None, f"LỖI: {exc}")
 
 
-def _start_run(kind: str, job) -> int:
+def _start_run(kind: str, job, user_id: int | None = None) -> int:
     conn = db.get_conn()
     cur = conn.execute(
-        "INSERT INTO runs (kind, status) VALUES (?, 'queued')", (kind,))
+        "INSERT INTO runs (kind, status, user_id) VALUES (?, 'queued', ?)",
+        (kind, user_id))
     run_id = cur.lastrowid
     conn.execute("INSERT INTO jobs (run_id) VALUES (?)", (run_id,))
     conn.commit()
     with _lock:
-        _live_runs[run_id] = {"subs": [], "done": False, "result": None, "error": None}
+        _live_runs[run_id] = {"subs": [], "done": False, "result": None,
+                              "error": None, "user_id": user_id}
+        _prune_live_runs_locked()
     threading.Thread(target=_worker, args=(run_id, job), daemon=True).start()
     return run_id
 
 
+def _own_run(run_id: int, user):
+    """Codex R1-1: run status/SSE are readable only by the run's owner.
+    Non-owners get 404. Open mode: all allowed."""
+    if not auth.auth_enabled():
+        return
+    row = db.get_conn().execute(
+        "SELECT id FROM runs WHERE id = ? AND user_id = ?", (run_id, user["id"]),
+    ).fetchone()
+    if not row:
+        raise HTTPException(404, "Không tìm thấy run")
+
+
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB (Codex R1-5)
+
+
 def _extract_upload(upload: UploadFile) -> str:
-    suffix = Path(upload.filename or "").suffix.lower()
+    raw_name = upload.filename or ""
+    # Sanitise: keep the basename only; reject traversal components outright.
+    safe_name = Path(raw_name).name
+    if not safe_name or safe_name in (".", "..") or ".." in safe_name:
+        raise HTTPException(400, "Tên tệp không hợp lệ")
+    suffix = Path(safe_name).suffix.lower()
     if suffix not in (".docx", ".pdf", ".txt", ".md"):
         raise HTTPException(400, f"Chưa hỗ trợ tệp {suffix or '(không rõ)'} — dùng .docx, .pdf, .txt")
-    dest = config.UPLOADS_DIR / f"{upload.filename}"
-    dest.write_bytes(upload.file.read())
+    data = upload.file.read(MAX_UPLOAD_BYTES + 1)
+    if len(data) > MAX_UPLOAD_BYTES:
+        raise HTTPException(413, "Tệp quá lớn (tối đa 20 MB)")
+    dest = config.UPLOADS_DIR / f"{safe_name}"
+    dest.write_bytes(data)
     try:
         if suffix == ".pdf":
             from .ocr import extract_pdf_text
@@ -269,9 +341,9 @@ async def generate(
     }.items() if v}
     if user_spec:
         request["format_spec"] = user_spec
-        _cache_user_spec(1, request.get("doc_type", "lesson_plan"), user_spec)
+        _cache_user_spec(user["id"], request.get("doc_type", "lesson_plan"), user_spec)
     else:
-        cached = _cached_user_spec(1, request.get("doc_type") or "lesson_plan")
+        cached = _cached_user_spec(user["id"], request.get("doc_type") or "lesson_plan")
         if cached:
             request["format_spec"] = cached
 
@@ -279,7 +351,7 @@ async def generate(
         return run_full_pipeline(request, source_text, progress=progress,
                                  run_id=run_id, user_id=user["id"])
 
-    run_id = _start_run("full", job)
+    run_id = _start_run("full", job, user_id=user["id"])
     return {"run_id": run_id}
 
 
@@ -297,7 +369,7 @@ async def edit_document(document_id: int, instruction: str = Form(...), request:
     def job(run_id: int, progress):
         return run_edit(document_id, instruction, progress=progress, run_id=run_id)
 
-    run_id = _start_run("edit", job)
+    run_id = _start_run("edit", job, user_id=user["id"])
     return {"run_id": run_id}
 
 
@@ -334,7 +406,7 @@ async def restore_version(version_id: int, request: Request = None):
                 "version_id": new_version_id, "document": document,
                 "review_summary": f"Đã phục hồi từ v{version['version']}", "kind": "restore"}
 
-    run_id = _start_run("restore", job)
+    run_id = _start_run("restore", job, user_id=user["id"])
     return {"run_id": run_id}
 
 
@@ -375,7 +447,11 @@ def document_diff(document_id: int, from_version: int, to_version: int, request:
 
 
 @app.get("/api/runs/{run_id}/events")
-def run_events(run_id: int):
+def run_events(run_id: int, request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    _own_run(run_id, user)
     q: queue.Queue = queue.Queue()
     with _lock:
         entry = _live_runs.get(run_id)
@@ -385,25 +461,35 @@ def run_events(run_id: int):
         already_done, result, error = entry["done"], entry["result"], entry["error"]
 
     def stream():
-        if already_done:
-            yield f"data: {json.dumps({'type': 'done' if result else 'error', 'result': result, 'error': error}, ensure_ascii=False)}\n\n"
-            return
-        while True:
-            try:
-                payload = q.get(timeout=120)
-            except queue.Empty:
-                yield ": keep-alive\n\n"
-                continue
-            yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            if payload.get("type") in ("done", "error"):
-                break
+        try:
+          if already_done:
+              yield f"data: {json.dumps({'type': 'done' if result else 'error', 'result': result, 'error': error}, ensure_ascii=False)}\n\n"
+              return
+          while True:
+              try:
+                  payload = q.get(timeout=15)  # 15 s heartbeat: well under Cloudflare's read timeout
+              except queue.Empty:
+                  yield ": keep-alive\n\n"
+                  continue
+              yield f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+              if payload.get("type") in ("done", "error"):
+                  break
+        finally:
+            with _lock:
+                entry = _live_runs.get(run_id)
+                if entry and q in entry["subs"]:
+                    entry["subs"].remove(q)  # drop disconnected subscribers (R1-14/R2-6)
 
     return StreamingResponse(stream(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/api/runs/{run_id}")
-def run_status(run_id: int):
+def run_status(run_id: int, request: Request = None):
+    user = current_user(request)
+    if user is None:
+        raise HTTPException(401, "Cần đăng nhập")
+    _own_run(run_id, user)
     row = db.get_conn().execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
         raise HTTPException(404, "Không tìm thấy run")
@@ -491,6 +577,8 @@ def download(version_id: int, fmt: str = "docx", request: Request = None):
     if user is None:
         raise HTTPException(401, "Cần đăng nhập")
     row = _own_version(version_id, user)
+    if fmt not in ("docx", "pdf"):
+        raise HTTPException(400, f"Định dạng không hỗ trợ: {fmt} (dùng docx hoặc pdf)")
     path = row["file_docx"] if fmt == "docx" else row["file_pdf"]
     if not path or not Path(path).exists():
         raise HTTPException(404, f"Chưa có tệp {fmt.upper()} cho phiên bản này")
@@ -507,19 +595,53 @@ def download(version_id: int, fmt: str = "docx", request: Request = None):
 
 RATE_LIMIT_RUNS = config.RATE_LIMIT_RUNS    # pipeline runs per window (cost cap, plan §10)
 RATE_LIMIT_WINDOW = config.RATE_LIMIT_WINDOW
+RATE_LIMIT_CLIENTS_CAP = 10_000             # bound bucket memory (Codex R1-8/9)
+LOGIN_ATTEMPTS_LIMIT = 20                   # per window, per IP (Codex R1-7)
 _run_times: dict[str, deque] = defaultdict(deque)
+_login_times: dict[str, deque] = defaultdict(deque)
+
+
+def client_ip(request: Request | None) -> str:
+    """Real client IP. Behind the tunnel only: when APP_TRUST_PROXY=1 and the
+    direct peer is loopback, trust Cloudflare's CF-Connecting-IP — validated and
+    normalised, first value only; X-Forwarded-For is never trusted (Codex R1-8)."""
+    peer = request.client.host if request and request.client else "local"
+    if config.TRUST_PROXY and peer in ("127.0.0.1", "::1"):
+        raw = (request.headers.get("cf-connecting-ip") or "").split(",")[0].strip()
+        try:
+            return str(ipaddress.ip_address(raw))
+        except ValueError:
+            pass  # missing or garbage header → fall back to the socket peer
+    return peer
+
+
+def _prune_buckets(buckets: dict[str, deque]) -> None:
+    if len(buckets) > RATE_LIMIT_CLIENTS_CAP:
+        for key in list(buckets.keys())[: len(buckets) - RATE_LIMIT_CLIENTS_CAP]:
+            del buckets[key]
+
+
+def _hit_bucket(buckets: dict[str, deque], request: Request, limit: int) -> None:
+    client = client_ip(request)
+    now = time.time()
+    bucket = buckets[client]
+    while bucket and now - bucket[0] > RATE_LIMIT_WINDOW:
+        bucket.popleft()
+    if len(bucket) >= limit:
+        raise HTTPException(
+            429, "Đã đạt giới hạn số lần chạy trong 10 phút. Thử lại sau.")
+    bucket.append(now)
+    with _lock:
+        _prune_buckets(buckets)
 
 
 def _check_rate_limit(request: Request) -> None:
-    client = request.client.host if request.client else "local"
-    now = time.time()
-    bucket = _run_times[client]
-    while bucket and now - bucket[0] > RATE_LIMIT_WINDOW:
-        bucket.popleft()
-    if len(bucket) >= RATE_LIMIT_RUNS:
-        raise HTTPException(
-            429, "Đã đạt giới hạn số lần chạy trong 10 phút (giới hạn chi phí). Thử lại sau.")
-    bucket.append(now)
+    _hit_bucket(_run_times, request, RATE_LIMIT_RUNS)
+
+
+def _check_login_throttle(request: Request | None) -> None:
+    if request is not None:
+        _hit_bucket(_login_times, request, LOGIN_ATTEMPTS_LIMIT)
 
 
 @app.get("/api/settings")
@@ -528,7 +650,11 @@ def get_settings():
 
 
 @app.post("/api/settings")
-async def update_settings(payload: dict):
+async def update_settings(payload: dict, request: Request = None):
+    if auth.auth_enabled():
+        user = auth.session_user(_session_token(request))
+        if user is None or user["id"] != 1:
+            raise HTTPException(403, "Chỉ tài khoản đầu tiên mới được đổi cài đặt chung")
     try:
         if "default_provider" in payload:
             keys.set_default_provider(payload["default_provider"])

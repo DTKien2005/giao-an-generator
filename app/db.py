@@ -68,6 +68,7 @@ CREATE TABLE IF NOT EXISTS runs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     conversation_id INTEGER REFERENCES conversations(id),  -- nullable while queued
     document_id INTEGER REFERENCES documents(id),
+    user_id INTEGER,                       -- owner (v6: run/SSE authorization)
     kind TEXT NOT NULL DEFAULT 'full',     -- full | small_edit
     status TEXT NOT NULL DEFAULT 'queued', -- queued | running | done | error
     progress TEXT NOT NULL DEFAULT '',     -- last SSE status line
@@ -142,6 +143,19 @@ def _migrate(conn: sqlite3.Connection) -> None:
     conv_columns = {row[1] for row in conn.execute("PRAGMA table_info(conversations)")}
     if "deleted_at" not in conv_columns:
         conn.execute("ALTER TABLE conversations ADD COLUMN deleted_at TEXT")
+    runs_columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)")}
+    if "user_id" not in runs_columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN user_id INTEGER")
+        # backfill ownership so pre-v6 runs stay accessible to their owners
+        conn.execute(
+            "UPDATE runs SET user_id = ("
+            "  SELECT c.user_id FROM conversations c WHERE c.id = runs.conversation_id)"
+            " WHERE user_id IS NULL AND conversation_id IS NOT NULL")
+        conn.execute(
+            "UPDATE runs SET user_id = ("
+            "  SELECT c.user_id FROM documents d JOIN conversations c ON c.id = d.conversation_id"
+            "  WHERE d.id = runs.document_id)"
+            " WHERE user_id IS NULL AND document_id IS NOT NULL")
 
 
 @contextmanager

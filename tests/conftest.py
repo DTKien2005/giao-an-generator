@@ -42,6 +42,14 @@ def reset_auth_state():
         raise
 
 
+@pytest.fixture(autouse=True)
+def _reset_auth_after_each_test():
+    """Safety net: never let one test's auth state leak into the next
+    (a mid-test failure used to keep login enabled for the whole suite)."""
+    yield
+    reset_auth_state()
+
+
 @pytest.fixture(scope="session")
 def client():
     with TestClient(app) as c:  # context manager → lifespan → db.init_db()

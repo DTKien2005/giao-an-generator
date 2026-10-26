@@ -34,6 +34,12 @@ class PipelineError(Exception):
 # Shared helpers
 # ---------------------------------------------------------------------------
 
+def _conversation_user(conversation_id: int) -> int | None:
+    row = db.get_conn().execute(
+        "SELECT user_id FROM conversations WHERE id = ?", (conversation_id,)).fetchone()
+    return row["user_id"] if row else None
+
+
 def _progress(cb, label: str) -> None:
     if cb:
         cb(label)
@@ -235,8 +241,9 @@ def run_full_pipeline(request: dict, source_text: str, *,
 
     if run_id is None:
         cur = conn.execute(
-            "INSERT INTO runs (conversation_id, document_id, kind, status) VALUES (?,?,?, 'running')",
-            (conversation_id, document_id, "full"),
+            "INSERT INTO runs (conversation_id, document_id, user_id, kind, status)"
+            " VALUES (?,?,?,?, 'running')",
+            (conversation_id, document_id, user_id, "full"),
         )
         run_id = cur.lastrowid
     else:
@@ -325,8 +332,10 @@ def run_edit(document_id: int, instruction: str, *,
     )
     if run_id is None:
         cur = conn.execute(
-            "INSERT INTO runs (conversation_id, document_id, kind, status) VALUES (?,?,?, 'running')",
-            (doc_row["conversation_id"], document_id, "small_edit" if kind == "small" else "full"),
+            "INSERT INTO runs (conversation_id, document_id, user_id, kind, status)"
+            " VALUES (?,?,?,?, 'running')",
+            (doc_row["conversation_id"], document_id, _conversation_user(doc_row["conversation_id"]),
+             "small_edit" if kind == "small" else "full"),
         )
         run_id = cur.lastrowid
     else:

@@ -365,6 +365,50 @@ cùng base image python:3.12.
 
 ---
 
+## v6 — Go-live: bảo mật, tunnel-ready, mobile web
+**Date:** 2026-10-26 · **Repo:** tag `v6` · **Plan:** `PLANS_V6.md` (5 vòng duyệt;
+Codex reviewer: lượt 1 = 25 findings trên plan+code cũ, lượt 2 = 15 findings trên code mới)
+
+**Added**
+- **WP0:** run/SSE kiểm quyền (`runs.user_id` + migration backfill); upload
+  chống traversal + cap 20 MB; format-spec cache per-user; settings/tạo user
+  chỉ dành tài khoản đầu tiên; `_live_runs` cap + gỡ subscriber; `.gitignore`
+  thêm `.env*`, `web_env.bat`, token patterns.
+- **WP1:** `client_ip()` — `CF-Connecting-IP` chỉ tin từ loopback khi
+  `APP_TRUST_PROXY=1`, validate/normalize bằng `ipaddress`, bucket có trần.
+- **WP2:** `APP_SETUP_TOKEN` (compare_digest bytes) + atomic claim
+  (`UPDATE … WHERE password_hash=''`) + mật khẩu tối thiểu 8 + login throttle
+  20/10 phút + `setup_token_required` trong `/api/me`.
+- **WP3:** `/healthz` (liveness, không auth) + startup reconciliation (run dở
+  sau crash → error) + `scripts/windows/` (run_web.bat bind 127.0.0.1 với env
+  từ `web_env.bat` git-ignored; install/uninstall Task Scheduler idempotent).
+- **WP4:** backup atomic (`.part` → integrity → `os.replace`) +
+  `APP_BACKUP_COPY_DIR` off-disk copy (verify size, chặn dest trong `data/`,
+  exit non-zero khi copy fail).
+- **WP6 mobile web (không native app):** layout ≤900px (input 16 px chống iOS
+  zoom, target 44 px, bảng cuộn ngang trong wrapper), SSE heartbeat 15 s +
+  auto-reconnect cap 20, khoá nút khi đang chạy; xác minh 3 viewport bằng
+  trình duyệt thật.
+- **WP5:** `docs/DEPLOY.md` viết lại (runbook go-live, Access trước khi phát
+  hành hostname, di trú VPS); README/UPDATES.md cập nhật; REPORT.md compact
+  sau mỗi gói triển khai.
+
+**Fixed (2 bug cũ + lỗi tự gây ra, đều bắt được trong vòng duyệt):**
+- [SEC, từ v3] Run/SSE không kiểm quyền theo user (Codex R1-1).
+- [BUG, từ v3] Login overlay luôn hiển thị ở chế độ mở (CSS `display:flex` đè
+  `hidden`) — phát hiện qua screenshot khi xác minh mobile.
+- Patch "im lặng" (heartbeat 15s không được áp dụng do escape sai) — Codex bắt
+  ở lượt 2; race `_finish`; setup CPU-exhaustion; duplicate username 500;
+  partial copy; callback generate mất `openDocument` sau refactor UI (bắt khi
+  xác minh trình duyệt, sửa ngay).
+
+**Verified:** pytest **65/65** (Python 3.14; CI 3.12), eval **10/10**, browser:
+run/edit/restore trọn vẹn + overlay ẩn đúng; `reports/v6_review.md` (5 vòng),
+`reports/v6_report.md` (khoa học, 2 vòng duyệt, có mục phụ lục chờ chủ nhà
+điền kết quả go-live Cloudflare).
+
+---
+
 ### Cách chạy lại
 ```bash
 python -m app.ingest && python -m uvicorn app.main:app --port 8090   # mock, không cần key

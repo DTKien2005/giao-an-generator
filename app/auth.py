@@ -7,6 +7,7 @@ session cookie. Passwords: PBKDF2-HMAC-SHA256, 240k iterations, per-user salt.
 import hashlib
 import hmac
 import secrets
+import sqlite3
 
 from . import db
 
@@ -42,34 +43,58 @@ def auth_enabled() -> bool:
 
 def setup_first_user(name: str, password: str) -> int:
     """Claim the shared sentinel row as the first real account — all data
-    created in open mode stays owned by this user."""
-    if auth_enabled():
-        raise PermissionError("Đã có người dùng — dùng /api/login")
+    created in open mode stays owned by this user.
+
+    Atomic claim (Codex R1-3): the conditional UPDATE wins for exactly one
+    concurrent caller; the loser's rowcount is 0. Never leaves an open
+    transaction behind on the failure paths (a stuck write lock once froze
+    the whole suite)."""
     name = name.strip()
     if not name or not password:
         raise ValueError("Cần tên đăng nhập và mật khẩu")
+    _check_password(password)
     conn = db.get_conn()
-    conn.execute(
-        "UPDATE users SET name = ?, password_hash = ? WHERE id = 1",
-        (name, hash_password(password)),
-    )
-    conn.execute("DELETE FROM sessions")
-    conn.commit()
+    try:
+        cur = conn.execute(
+            "UPDATE users SET name = ?, password_hash = ? WHERE id = 1 AND password_hash = ''",
+            (name, hash_password(password)),
+        )
+        if cur.rowcount == 0:
+            conn.rollback()  # release the write transaction before raising
+            raise PermissionError("Đã có người dùng — dùng /api/login")
+        conn.execute("DELETE FROM sessions")
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
     return 1
+
+
+MIN_PASSWORD_LEN = 8  # Codex R1-7
+
+
+def _check_password(password: str) -> None:
+    if len(password) < MIN_PASSWORD_LEN:
+        raise ValueError(f"Mật khẩu cần ít nhất {MIN_PASSWORD_LEN} ký tự")
 
 
 def create_user(name: str, password: str) -> int:
     """Create a user; the *endpoints* decide who is allowed to call this
-    (setup: only while no user exists; /api/users: any logged-in user)."""
+    (setup: only while no user exists; /api/users: the first account)."""
     name = name.strip()
     if not name or not password:
         raise ValueError("Cần tên đăng nhập và mật khẩu")
+    _check_password(password)
     conn = db.get_conn()
-    cur = conn.execute(
-        "INSERT INTO users (name, password_hash) VALUES (?, ?)",
-        (name, hash_password(password)),
-    )
-    conn.commit()
+    try:
+        cur = conn.execute(
+            "INSERT INTO users (name, password_hash) VALUES (?, ?)",
+            (name, hash_password(password)),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        raise ValueError("Tên đăng nhập đã tồn tại")
     return cur.lastrowid
 
 

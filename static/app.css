@@ -446,6 +446,7 @@ textarea { resize: vertical; }
 .colophon code { background: var(--paper-deep); padding: 1px 5px; border-radius: 3px; }
 
 /* ---------------- login overlay ---------------- */
+.login-overlay[hidden] { display: none; }  /* author display:flex beats UA [hidden] otherwise */
 .login-overlay {
   position: fixed;
   inset: 0;
@@ -462,3 +463,30 @@ textarea { resize: vertical; }
   box-shadow: 6px 8px 0 rgba(0, 0, 0, .25);
 }
 .account-state .hint { margin-top: 0; }
+
+/* ---------------- mobile web (v6 WP6) ---------------- */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+@media (max-width: 900px) {
+  .paper { padding: 0 14px 0 22px; }
+  .paper::before { left: 8px; }
+  .paper::after { left: 12px; }
+  .masthead { padding-top: 24px; }
+  .masthead h1 { font-size: 30px; }
+  .layout { grid-template-columns: 1fr; gap: 16px; }
+  .card { padding: 14px 14px 16px; }
+  /* 16px inputs prevent iOS zoom-on-focus; 44px targets are thumb-friendly */
+  input[type="text"], input[type="password"], textarea, select { font-size: 16px; padding: 11px 12px; }
+  .btn-primary { min-height: 44px; font-size: 16px; }
+  .segmented label { padding: 12px 6px; }
+  .doc-actions { gap: 8px; }
+  .btn-dl { padding: 11px 14px; min-height: 44px; display: inline-flex; align-items: center; }
+  .doc-body { padding: 14px 14px; font-size: 14px; }
+  .doc-body th, .doc-body td { font-size: 13px; }
+  .edit-form { flex-direction: column; }
+  .edit-form .btn-primary { width: 100%; min-height: 44px; }
+  .chat-messages li { max-width: 95%; }
+  .tabs { overflow-x: auto; }
+  .tab { padding: 10px 16px; white-space: nowrap; }
+  .stamp { position: static; display: inline-block; margin-top: 8px; }
+}

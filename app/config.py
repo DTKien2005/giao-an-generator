@@ -28,6 +28,13 @@ MAX_TOKENS_PER_CALL = 8192
 RATE_LIMIT_RUNS = int(os.environ.get("APP_RATE_LIMIT", "10"))   # cost cap (plan §10)
 RATE_LIMIT_WINDOW = 600  # seconds
 
+# v6 go-live (PLANS_V6.md): trust Cloudflare's CF-Connecting-IP from loopback,
+# optional first-account setup token, Secure session cookie in production.
+TRUST_PROXY = os.environ.get("APP_TRUST_PROXY", "") == "1"
+SETUP_TOKEN = os.environ.get("APP_SETUP_TOKEN", "")
+COOKIE_SECURE = os.environ.get("APP_COOKIE_SECURE", "") == "1"
+BACKUP_COPY_DIR = os.environ.get("APP_BACKUP_COPY_DIR", "")
+
 # Fallback system fonts (the primary PDF font is vendored in assets/fonts/ —
 # see app/render_pdf.py). Windows paths kept for machines without the asset.
 PDF_FONT_CANDIDATES = [

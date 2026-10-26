@@ -91,6 +91,9 @@ async function refreshLoginState() {
   }
   $("#account-open").hidden = me.auth_enabled;
   $("#account-logged").hidden = !me.auth_enabled;
+  $("#acc-token-field").hidden = !me.setup_token_required;
+  $("#acc-token-field").hidden = !me.setup_token_required;
+  $("#acc-token-field").hidden = !me.setup_token_required;
   $("#account-who").textContent = me.name
     ? `Đã đăng nhập: ${me.name}` : "";
 }
@@ -118,6 +121,7 @@ async function onAccountSubmit(ev) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       name: $("#acc-name").value, password: $("#acc-password").value,
+      setup_token: $("#acc-token").value,
     }),
   });
   const body = await resp.json().catch(() => ({}));
@@ -198,44 +202,28 @@ async function onSubmit(ev) {
   ev.preventDefault();
   const form = ev.target;
   const btn = $("#btn-generate");
-  btn.disabled = true;
+  btn.disabled = true;               // stays disabled until the run finishes (Codex R1-15)
   btn.textContent = "Đang gửi…";
   resetProgress();
   try {
     const resp = await fetch("/api/generate", { method: "POST", body: new FormData(form) });
-    if (unauthorized(resp)) return;
+    if (unauthorized(resp)) { btn.disabled = false; btn.textContent = "Soạn tài liệu"; return; }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       addProgress(err.detail || `Lỗi HTTP ${resp.status}`, "error");
+      btn.disabled = false; btn.textContent = "Soạn tài liệu";
       return;
     }
     const { run_id } = await resp.json();
-    followRun(run_id);
+    followRun(run_id, (result) => {
+      setRunButtonsDisabled(false);
+      btn.textContent = "Soạn tài liệu";
+      if (result) openDocument(result.document_id, result.version_id);
+    });
   } catch (e) {
     addProgress(`Không gửi được yêu cầu: ${e}`, "error");
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Soạn tài liệu";
+    btn.disabled = false; btn.textContent = "Soạn tài liệu";
   }
-}
-
-function followRun(runId) {
-  const es = new EventSource(`/api/runs/${runId}/events`);
-  es.onmessage = (ev) => {
-    const data = JSON.parse(ev.data);
-    if (data.type === "progress") {
-      addProgress(data.label);
-    } else if (data.type === "done") {
-      markLastDone();
-      addProgress("Hoàn tất!", "done");
-      es.close();
-      openDocument(data.result.document_id, data.result.version_id);
-    } else if (data.type === "error") {
-      addProgress(data.error, "error");
-      es.close();
-    }
-  };
-  es.onerror = () => es.close();
 }
 
 // ---------------------------------------------------------------- progress UI
@@ -256,38 +244,18 @@ function markLastDone() {
 }
 
 // ---------------------------------------------------------------- follow-up edits
-async function onEditSubmit(ev) {
-  ev.preventDefault();
-  const input = $("#edit-input");
-  const instruction = input.value.trim();
-  if (!instruction || !currentDoc) return;
-  input.value = "";
-  appendChat("user", instruction);
-  $("#btn-generate").disabled = true;
-  resetProgress();
-  try {
-    const body = new FormData();
-    body.append("instruction", instruction);
-    const resp = await fetch(`/api/documents/${currentDoc.document.id}/edit`,
-      { method: "POST", body });
-    if (unauthorized(resp)) return;
-    if (!resp.ok) {
-      const err = await resp.json().catch(() => ({}));
-      appendChat("assistant", err.detail || `Lỗi HTTP ${resp.status}`);
-      return;
-    }
-    const { run_id } = await resp.json();
-    followEditRun(run_id);
-  } catch (e) {
-    appendChat("assistant", `Không gửi được: ${e}`);
-  } finally {
-    $("#btn-generate").disabled = false;
-  }
+function setRunButtonsDisabled(disabled) {
+  $("#btn-generate").disabled = disabled;
+  $("#btn-restore").disabled = disabled;
 }
 
-function followEditRun(runId) {
+function followRun(runId, onFinished) {
+  // Shared follower (generate / edit / restore): EventSource reconnects on its
+  // own on network loss (mobile Wi-Fi↔data, R1-13); we give up after 20 retries.
   const es = new EventSource(`/api/runs/${runId}/events`);
+  let retries = 0;
   es.onmessage = (ev) => {
+    retries = 0;
     const data = JSON.parse(ev.data);
     if (data.type === "progress") {
       addProgress(data.label);
@@ -295,15 +263,98 @@ function followEditRun(runId) {
       markLastDone();
       addProgress("Hoàn tất!", "done");
       es.close();
-      appendChat("assistant", data.result.review_summary || "Đã chỉnh sửa xong.");
-      openDocument(data.result.document_id, data.result.version_id);
+      if (onFinished) onFinished(data.result);
     } else if (data.type === "error") {
       addProgress(data.error, "error");
-      appendChat("assistant", data.error);
       es.close();
+      if (onFinished) onFinished(null, data.error);
     }
   };
-  es.onerror = () => es.close();
+  es.onerror = () => {
+    retries += 1;
+    if (retries > 20) {
+      es.close();
+      addProgress("Mất kết nối tới tiến độ — thử tải lại trang.", "error");
+      if (onFinished) onFinished(null, "mất kết nối");
+    }
+  };
+}
+
+function setRunButtonsDisabled(disabled) {
+  $("#btn-generate").disabled = disabled;
+  $("#btn-restore").disabled = disabled;
+}
+
+function followRun(runId, onFinished) {
+  // Shared follower (generate / edit / restore): EventSource reconnects on its
+  // own on network loss (mobile Wi-Fi↔data, R1-13); we give up after 20 retries.
+  const es = new EventSource(`/api/runs/${runId}/events`);
+  let retries = 0;
+  es.onmessage = (ev) => {
+    retries = 0;
+    const data = JSON.parse(ev.data);
+    if (data.type === "progress") {
+      addProgress(data.label);
+    } else if (data.type === "done") {
+      markLastDone();
+      addProgress("Hoàn tất!", "done");
+      es.close();
+      if (onFinished) onFinished(data.result);
+    } else if (data.type === "error") {
+      addProgress(data.error, "error");
+      es.close();
+      if (onFinished) onFinished(null, data.error);
+    }
+  };
+  es.onerror = () => {
+    retries += 1;
+    if (retries > 20) {
+      es.close();
+      addProgress("Mất kết nối tới tiến độ — thử tải lại trang.", "error");
+      if (onFinished) onFinished(null, "mất kết nối");
+    }
+  };
+}
+
+async function onEditSubmit(ev) {
+  ev.preventDefault();
+  const input = $("#edit-input");
+  const instruction = input.value.trim();
+  if (!instruction || !currentDoc) return;
+  input.value = "";
+  appendChat("user", instruction);
+  setRunButtonsDisabled(true);          // until the edit run finishes (R1-15/R2-7)
+  resetProgress();
+  try {
+    const body = new FormData();
+    body.append("instruction", instruction);
+    const resp = await fetch(`/api/documents/${currentDoc.document.id}/edit`,
+      { method: "POST", body });
+    if (unauthorized(resp)) { setRunButtonsDisabled(false); return; }
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      appendChat("assistant", err.detail || `Lỗi HTTP ${resp.status}`);
+      setRunButtonsDisabled(false);
+      return;
+    }
+    const { run_id } = await resp.json();
+    followEditRun(run_id, () => setRunButtonsDisabled(false));
+  } catch (e) {
+    appendChat("assistant", `Không gửi được: ${e}`);
+    setRunButtonsDisabled(false);
+  }
+}
+
+function followEditRun(runId, onFinished) {
+  followRun(runId, (result, error) => {
+    if (result) {
+      appendChat("assistant", result.review_summary || "Đã chỉnh sửa xong.");
+      openDocument(result.document_id, result.version_id);
+    } else if (error) {
+      appendChat("assistant", error);
+    }
+    if (onFinished) onFinished();
+  });
 }
 
 function renderChat() {
@@ -331,30 +382,28 @@ function appendChat(role, content) {
 // ---------------------------------------------------------------- restore
 async function onRestore() {
   if (!currentVersion || !confirm("Phục hồi nội dung phiên bản này thành phiên bản mới nhất?")) return;
-  const btn = $("#btn-restore");
-  btn.disabled = true;
+  setRunButtonsDisabled(true);          // R2-7: no overlapping runs
   resetProgress();
   try {
     const resp = await fetch(`/api/versions/${currentVersion.id}/restore`, { method: "POST" });
-    if (unauthorized(resp)) return;
+    if (unauthorized(resp)) { setRunButtonsDisabled(false); return; }
     if (!resp.ok) {
       const err = await resp.json().catch(() => ({}));
       addProgress(err.detail || `Lỗi HTTP ${resp.status}`, "error");
+      setRunButtonsDisabled(false);
       return;
     }
     const { run_id } = await resp.json();
-    const es = new EventSource(`/api/runs/${run_id}/events`);
-    es.onmessage = (ev) => {
-      const data = JSON.parse(ev.data);
-      if (data.type === "progress") addProgress(data.label);
-      else if (data.type === "done") {
-        markLastDone(); addProgress("Đã phục hồi!", "done"); es.close();
-        openDocument(data.result.document_id, data.result.version_id);
-      } else if (data.type === "error") { addProgress(data.error, "error"); es.close(); }
-    };
-    es.onerror = () => es.close();
-  } finally {
-    btn.disabled = false;
+    followRun(run_id, (result) => {
+      setRunButtonsDisabled(false);
+      if (result) {
+        addProgress("Đã phục hồi!", "done");
+        openDocument(result.document_id, result.version_id);
+      }
+    });
+  } catch (e) {
+    addProgress(`Không gửi được: ${e}`, "error");
+    setRunButtonsDisabled(false);
   }
 }
 
@@ -477,13 +526,13 @@ function renderDocument(doc) {
       sec.materials.map((o) => `<li>${esc(o)}</li>`).join("") + "</ul>";
   }
   if (sec.activities?.length) {
-    html += "<h3>III. Các hoạt động dạy học</h3><table>" +
+    html += '<h3>III. Các hoạt động dạy học</h3><div class="table-scroll"><table>' +
       "<tr><th>Hoạt động</th><th>Giáo viên / Học sinh</th><th>Phút</th></tr>" +
       sec.activities.map((a) =>
         `<tr><td><b>${esc(a.name)}</b></td>` +
         `<td>GV: ${esc(a.teacher)}<br/>HS: ${esc(a.students)}</td>` +
         `<td>${esc(a.minutes)}</td></tr>`).join("") +
-      "</table>";
+      "</table></div>";
   }
   if (sec.assessment) {
     html += `<h3>IV. Đánh giá</h3><p>${esc(sec.assessment)}</p>`;

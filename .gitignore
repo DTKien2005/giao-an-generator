@@ -6,6 +6,15 @@
 # Local data: SQLite DB, generated .docx/.pdf, uploads, encryption key
 data*/
 
+# Secrets: env files, Windows task env, tunnel credentials (v6 WP0 / Codex R1-4)
+.env
+.env.*
+*.env
+scripts/windows/web_env.bat
+*.token
+cloudflared/
+*.pem
+
 # Python
 __pycache__/
 *.pyc

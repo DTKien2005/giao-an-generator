@@ -20,7 +20,8 @@ def test_open_mode_without_users():
     with TestClient(app) as client:
         assert client.get("/api/conversations").status_code == 200
         me = client.get("/api/me").json()
-        assert me == {"name": None, "auth_enabled": False}
+        assert me["name"] is None and me["auth_enabled"] is False
+        assert me["setup_token_required"] is False
 
 
 def test_setup_login_logout_and_protection():
@@ -32,21 +33,22 @@ def test_setup_login_logout_and_protection():
         assert client.get("/api/me").json()["name"] == "coCham"
 
         # 2. second setup refused
-        assert client.post("/api/setup", json={"name": "x", "password": "y"}).status_code == 409
+        assert client.post("/api/setup", json={"name": "x", "password": "y2345678"}).status_code == 409
 
         # 3. anonymous client is locked out, /api/me stays public
         anon = TestClient(app)
         assert anon.get("/api/conversations").status_code == 401
         assert anon.get("/api/me").json()["auth_enabled"] is True
+        assert anon.get("/api/me").json()["setup_token_required"] is False
 
         # 4. wrong password refused
         bad = TestClient(app)
         assert bad.post("/api/login", json={"name": "coCham", "password": "sai"}).status_code == 401
 
         # 5. isolation: another user cannot see coCham's data
-        client.post("/api/users", json={"name": "hocSinh", "password": "pass123"})
+        client.post("/api/users", json={"name": "hocSinh", "password": "pass1234"})
         other = TestClient(app)
-        other.post("/api/login", json={"name": "hocSinh", "password": "pass123"})
+        other.post("/api/login", json={"name": "hocSinh", "password": "pass1234"})
         resp = client.post("/api/generate", data={
             "grade": "grade_1", "subject": "toan", "lesson": "Bài riêng của coCham",
             "doc_type": "lesson_plan"})
@@ -94,7 +96,7 @@ def test_backup_creates_zip_with_database_and_rotation():
     config_keep = backup.KEEP
     backup.KEEP = 3
     try:
-        paths = [backup.create_backup() for _ in range(5)]
+        paths = [backup.create_backup()[0] for _ in range(5)]
         with zipfile.ZipFile(paths[-1]) as zf:
             names = zf.namelist()
         assert "app.db" in names

@@ -4,6 +4,60 @@
 
 ---
 
+## 0. v6 in progress (compacted after the implementation round, 2026-10-26)
+
+**Plan:** `PLANS_V6.md` — go-live on `https://giaoan.kinzz-server.io.vn`
+(Cloudflare Tunnel + Access, laptop-hosted). Frozen after **5 review cycles**;
+cycle 1 was a full Codex (`codex exec` 0.164.0) plan+code review that produced
+**25 findings**, the important ones turned into WP0..WP6 below.
+
+**Implemented this round (all offline-verifiable, mock provider):**
+- **WP0 security/bug fixes (Codex findings):** run/SSE ownership via new
+  `runs.user_id` column (cross-user → 404); upload hardening (basename-only
+  filenames, 20 MB cap → 413); format-spec cache now per-user (was hardcoded to
+  user 1); `/api/users` + `/api/settings` restricted to the first account when
+  auth is on; `_live_runs` capped at 100 finished entries + disconnected SSE
+  subscribers removed; `.gitignore` now covers `.env*`, `web_env.bat`, tokens.
+- **WP1:** `client_ip()` — trusts `CF-Connecting-IP` only when
+  `APP_TRUST_PROXY=1` **and** peer is loopback; validated/normalised with
+  `ipaddress`, comma-lists take the first value, garbage falls back to the peer;
+  `X-Forwarded-For` never trusted; rate-limit buckets bounded (10 000 clients).
+- **WP2:** `APP_SETUP_TOKEN` (constant-time bytes compare) gates
+  `POST /api/setup`; atomic sentinel claim (`UPDATE … WHERE password_hash = ''`,
+  rowcount-checked, rollback-safe); min password 8; per-IP login throttle
+  (20/10 min); `GET /api/me` exposes only `setup_token_required`.
+- **WP3:** `GET /healthz` (liveness, no auth/data) + startup reconciliation
+  (crashed runs → error) + `scripts/windows/run_web.bat`
+  (`127.0.0.1` bind, `APP_TRUST_PROXY=1`, `APP_COOKIE_SECURE=1`, env from
+  git-ignored `web_env.bat`, logs to `data/logs/web.log`) +
+  `install_tasks.bat`/`uninstall_tasks.bat` (GiaoAnWeb at logon+1 min,
+  GiaoAnBackup daily 23:00; idempotent).
+- **WP4:** backup zip is atomic (`.part` → integrity check → `os.replace`);
+  optional `APP_BACKUP_COPY_DIR` off-disk copy with size verification,
+  destination-inside-`data/` rejected, copy failure → non-zero exit without
+  touching the local zip.
+- **WP6 mobile web (no native app — user decision):** ≤900px layout — 16 px
+  inputs (no iOS zoom), 44 px touch targets, full-width buttons, table
+  `overflow-x` wrapper; SSE heartbeat 120 s→15 s; EventSource auto-reconnect
+  with 20-retry cap; generate/edit buttons stay disabled until the run
+  finishes. Verified in-browser at 390×844 / 360×800 / 768×1024: no horizontal
+  scroll, form + full run + downloads OK.
+- **Leftover bug found by the WP6 verification (from v3):** the login overlay
+  was **always visible** in open mode — `.login-overlay{display:flex}` overrode
+  the `hidden` attribute; fixed with `.login-overlay[hidden]{display:none}` and
+  re-verified in the browser.
+
+**Quality state after this round (final):** 65/65 tests (Python 3.14; CI on 3.12), eval 10/10.
+WP5 docs (DEPLOY.md rewritten, README env table) done. Close-out completed in the same session:
+final Codex bug hunt (15 more findings — 14 fixed, 1 accepted with rationale,
+plus a self-introduced openDocument regression caught and fixed during browser
+verification), `reports/v6_review.md` (5 cycles), scientific
+`reports/v6_report.md` (2 review passes), `UPDATES.md` v6 entry, tag `v6`.
+Remaining: the manual go-live runbook (Cloudflare/Tunnel/Access) which only the
+owner can perform on their Cloudflare account (template in v6_report.md §7).
+
+---
+
 ## 1. What the project is
 
 A local web app that drafts **Vietnamese lesson plans (giáo án)** and **weekly
