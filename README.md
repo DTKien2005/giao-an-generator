@@ -1,13 +1,33 @@
 # Soạn Giáo Án & Phiếu Bài Tập — AI Lesson Plan & Weekly Worksheet Generator
 
+[![CI](https://github.com/DTKien2005/giao-an-generator/actions/workflows/ci.yml/badge.svg)](https://github.com/DTKien2005/giao-an-generator/actions/workflows/ci.yml)
+
 Web app soạn **giáo án** và **phiếu bài tập tuần** bằng tiếng Việt, theo quy trình
 *nháp → thẩm định → chỉnh sửa* (tối đa 3 vòng) và kết xuất `.docx` / `.pdf`.
-Xem `PLANS.md` (thiết kế) và `UPDATES.md` (nhật ký phiên bản).
+Xem `PLANS.md` (thiết kế), `PLANS_V1-V5.md` (kế hoạch 5 phiên bản), `UPDATES.md`
+(nhật ký đầy đủ), `REPORT.md` (tóm tắt cả dự án) và `reports/` (biên bản duyệt
+từng phiên bản).
+
+## Tính năng
+
+- **Pipeline 3 vai trò:** tiếp nhận → truy xuất dataset → nháp → thẩm định →
+  chỉnh sửa; dừng sớm khi không còn lỗi nghiêm trọng và điểm ≥ 8/10.
+- **Đa nhà cung cấp:** Gemini, OpenAI, Anthropic (Claude), mô hình cục bộ
+  (Ollama / LM Studio / vLLM) và **mock ngoại tuyến** — chọn trong tab Cài đặt,
+  mô hình riêng cho từng vai trò, khoá API **mã hoá** trước khi lưu.
+- **Lịch sử & phiên bản:** mọi kết quả lưu thành phiên bản mới; chỉnh sửa tiếp
+  qua hộp chat (nhỏ → sửa một mục, lớn → chạy lại); xem diff màu giữa hai bản;
+  **phục hồi** (rollback) về bất kỳ bản nào mà không mất lịch sử.
+- **Giữ định dạng của bạn:** tải lên giáo án mẫu → app tự nhận cấu trúc mục và
+  soạn theo đúng định dạng đó cho các lần sau.
+- **OCR PDF quét** bằng Gemini Vision (không có khoá → bỏ qua trang an toàn).
+- **Đăng nhập bật tiến bộ** + **sao lưu dữ liệu** một lệnh (giữ 10 bản).
+- **Docker + CI** — pytest + bộ đánh giá chạy tự động trên mỗi push.
 
 ## Chạy thử nhanh (không cần API key)
 
 ```bash
-pip install fastapi uvicorn python-multipart httpx jinja2 python-docx reportlab pymupdf cryptography numpy
+pip install -r requirements.txt
 python -m app.ingest                 # nạp dataset mẫu vào kho vector
 python -m uvicorn app.main:app --port 8090
 # mở http://127.0.0.1:8090 — chạy ở chế độ "mock" ngoại tuyến
@@ -22,10 +42,9 @@ set GEMINI_API_KEY=...               # hoặc OPENAI_API_KEY / ANTHROPIC_API_KEY
 python -m uvicorn app.main:app --port 8090
 ```
 
-Cách 2 — tab **Cài đặt** trên web: chọn nhà cung cấp, mô hình riêng cho từng vai trò
-(Writer / Reviewer / Reviser / Intake), dán khoá API (được **mã hoá** trước khi lưu).
-Máy cục bộ (Ollama / LM Studio / vLLM): chọn "Mô hình cục bộ" và điền base URL
-(mặc định `http://localhost:11434/v1`).
+Cách 2 — tab **Cài đặt** trên web: chọn nhà cung cấp, mô hình riêng cho từng vai
+trò (Writer / Reviewer / Reviser / Intake), dán khoá API. Máy cục bộ: chọn
+"**Mô hình cục bộ**" và điền base URL (mặc định `http://localhost:11434/v1`).
 
 ## Dataset
 
@@ -36,18 +55,12 @@ dataset/
 
 - Mỗi tệp có `*.meta.json` kèm theo (grade, subject, lesson, doc_type); nếu thiếu,
   script suy ra từ cấu trúc thư mục.
-- Thêm tệp mới xong chạy lại `python -m app.ingest`.
+- Thêm tệp mới (kể cả PDF quét) xong chạy lại `python -m app.ingest`.
 
 ## CLI (không cần web)
 
 ```bash
 python -m app.cli "Giáo án toán lớp 1 bài các số có hai chữ số" --type lesson_plan
-```
-
-## Kiểm thử
-
-```bash
-python -m pytest tests/ -q
 ```
 
 ## Bộ đánh giá chất lượng (v1)
@@ -61,15 +74,11 @@ python scripts/make_eval.py      # nếu chưa có eval/
 python -m app.evaluate           # chạy với mock; thêm --provider gemini khi có khoá
 ```
 
-## Cài đặt
+## Kiểm thử
 
 ```bash
-pip install -r requirements.txt
+python -m pytest tests/ -q       # 48 test; CI chạy trên Python 3.12
 ```
-
-Triển khai Docker, truy cập từ xa qua Cloudflare Tunnel, sao lưu định kỳ và nâng
-cấp: xem **[docs/DEPLOY.md](docs/DEPLOY.md)**. Mỗi push vào `main` được CI
-(GitHub Actions) chạy pytest + bộ đánh giá tự động.
 
 ## Đăng nhập (từ v3)
 
@@ -80,7 +89,7 @@ chỉ thấy hội thoại/tài liệu của mình. Người đã đăng nhập 
 dùng (tab Cài đặt → Tài khoản). Mật khẩu băm PBKDF2-SHA256 (240.000 vòng).
 
 Quên mật khẩu (app cục bộ): dừng server rồi chạy
-`python -c "from app import db,auth; c=db.get_conn(); c.execute(\"DELETE FROM sessions\"); c.execute(\"DELETE FROM users\"); c.execute(\"INSERT INTO users (id,name,password_hash) VALUES (1,'shared','')\"); c.commit()"`
+`python -c "from app import db; c=db.get_conn(); c.execute(\"DELETE FROM sessions\"); c.execute(\"DELETE FROM users\"); c.execute(\"INSERT INTO users (id,name,password_hash) VALUES (1,'shared','')\"); c.commit()"`
 — app quay về chế độ mở, tạo lại tài khoản mới (dữ liệu cũ vẫn thuộc sentinel).
 
 ## Sao lưu dữ liệu (từ v3)
@@ -97,6 +106,24 @@ Scheduler): chạy `python -m app.backup` trong thư mục dự án lúc 23:00.
 schtasks /Create /SC DAILY /ST 23:00 /TN "GiaoAnBackup" /TR "cd /d H:\Web_Lam_Giao_An_Bang_Gemini && python -m app.backup"
 ```
 
+## Cấu trúc dự án
+
+```
+app/            # mã nguồn (pipeline, providers, renderers, auth, backup, ocr, eval)
+static/ templates/   # giao diện "vở học sinh" — không CDN, chạy offline
+dataset/ eval/  # dữ liệu mẫu + 10 ca đánh giá
+tests/          # 48 pytest (pipeline, API, render, auth, rollback…)
+assets/fonts/   # font tiếng Việt nhúng (IBM Plex Serif, OFL) cho PDF
+reports/        # biên bản duyệt code (≥3 vòng) + báo cáo (≥2 vòng) mỗi phiên bản
+docs/DEPLOY.md  # triển khai: laptop, Cloudflare Tunnel, Docker, nâng cấp
+```
+
+## Triển khai & CI
+
+Docker, truy cập từ xa qua Cloudflare Tunnel, lịch backup và nâng cấp: xem
+**[docs/DEPLOY.md](docs/DEPLOY.md)**. Mỗi push vào `main` được CI (GitHub
+Actions) chạy pytest + bộ đánh giá tự động (provider mock, không cần khoá).
+
 ## Biến môi trường
 
 | Biến | Ý nghĩa | Mặc định |
@@ -106,3 +133,12 @@ schtasks /Create /SC DAILY /ST 23:00 /TN "GiaoAnBackup" /TR "cd /d H:\Web_Lam_Gi
 | `APP_DATA_DIR` | thư mục dữ liệu (SQLite, tệp sinh ra, khoá mã hoá) | `./data` |
 | `APP_DATASET_DIR` | thư mục dataset | `./dataset` |
 | `APP_RATE_LIMIT` | số lượt chạy / 10 phút / máy (giới hạn chi phí) | 10 |
+
+## Bản quyền & nguồn
+
+- Toàn bộ nội dung dataset/eval là **bài gốc tự soạn** — không kèm tài liệu có
+  bản quyền (SGK thật chỉ nên nạp để dùng riêng, xem PLANS.md §10).
+- Font PDF: [IBM Plex Serif](https://github.com/IBM/plex) — SIL OFL 1.1
+  (`assets/fonts/LICENSE-IBMPlexSerif.txt`).
+- Thư viện tham khảo `skills/` và `andrej-karpathy-skills-main/` chỉ dùng như
+  tài liệu hướng dẫn, không nằm trong repo.
